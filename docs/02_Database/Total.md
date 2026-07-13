@@ -1,16 +1,16 @@
-| Service                  | PostgreSQL            | Redis                  | InfluxDB | Elasticsearch | 비고        |
-| ------------------------ | --------------------- | ---------------------- | -------- | ------------- | --------- |
-| **Auth Service**         | ✅ auth_user           | ✅ RefreshToken, 이메일 인증 | ❌        | ❌             | 인증 전용     |
-| **User Service**         | ✅ users               | (선택)                   | ❌        | ❌             | 프로필 관리    |
-| **Workspace Service**    | ✅ workspace 관련        | (선택)                   | ❌        | ❌             | 핵심 비즈니스   |
-| **AI Service**           | ❌                     | ✅ AI 응답 캐시(선택)         | ❌        | ❌             | Stateless |
-| **Embedding Service**    | ❌                     | ❌                      | ❌        | ✅ VectorDB    | 벡터 검색     |
-| **Collector Service**    | ❌                     | ❌                      | ❌        | ❌             | MQTT 수집만  |
-| **Rule Engine Service**  | ❌                     | ❌                      | ❌        | ❌             | 필터/분기     |
+| Service                  | PostgreSQL           | Redis                  | InfluxDB | Elasticsearch | 비고        |
+| ------------------------ | -------------------- | ---------------------- | -------- | ------------- | --------- |
+| **Auth Service**         | ✅ auth_user          | ✅ RefreshToken, 이메일 인증 | ❌        | ❌             | 인증 전용     |
+| **User Service**         | ✅ users              | (선택)                   | ❌        | ❌             | 프로필 관리    |
+| **Workspace Service**    | ✅ workspace 관련       | (선택)                   | ❌        | ❌             | 핵심 비즈니스   |
+| **AI Service**           | ❌                    | ✅ AI 응답 캐시(선택)         | ❌        | ❌             | Stateless |
+| **Embedding Service**    | ❌                    | ❌                      | ❌        | ✅ VectorDB    | 벡터 검색     |
+| **Collector Service**    | ❌                    | ❌                      | ❌        | ❌             | MQTT 수집만  |
+| **Rule Engine Service**  | ❌                    | ❌                      | ❌        | ❌             | 필터/분기     |
 | **Sensor Service**       | ✅ AI Report, EventLog | (선택)                   | ✅ 센서 데이터 | ❌             | 센서 저장     |
-| **Notification Service** | ❌                     | ❌                      | ❌        | ❌             | 알림 전송     |
-| **Gateway**              | ❌                     | ❌                      | ❌        | ❌             | 라우팅       |
-| **Datasource Service**   | ❌                     | ❌                      | ❌        | ❌             | CSV 파싱    |
+| **Notification Service** | ❌                    | ❌                      | ❌        | ❌             | 알림 전송     |
+| **Gateway**              | ❌                    | ❌                      | ❌        | ❌             | 라우팅       |
+| **Datasource Service**   | ✅                     | ❌                      | ❌        | ❌             | CSV 파싱    |
 
 ### PostgreSQL
 * Auth
