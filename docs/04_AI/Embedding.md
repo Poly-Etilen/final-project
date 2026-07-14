@@ -71,3 +71,4 @@ Embedding --> VectorDB
 - KNN Search
 - Cosine Similarity
 - Top-K Search
+- HNSW
