@@ -25,7 +25,6 @@
 - Workspace 삭제
 - Workspace 공유
 - 멤버 초대
-- 권한 관리
 
 ---
 
