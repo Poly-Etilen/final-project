@@ -10,6 +10,7 @@
 | Redis | 캐시 및 임시 데이터 | Auth, AI, Sensor |
 | InfluxDB | 시계열 센서 데이터 | Sensor |
 | Elasticsearch | Vector Search | Embedding |
+| MinIO | 생육 사진(이미지) 저장 | Cultivation, AI |
 
 ---
 
@@ -150,19 +151,38 @@ mushroom_environment
 
 ---
 
+# MinIO
+
+버섯 생육 사진(이미지)을 저장하는 객체 저장소입니다.
+
+## Bucket
+
+```
+mushroom-photos
+```
+
+## 사용 서비스
+
+| Service | 역할 |
+|----------|------|
+| Cultivation Service | 사진 업로드 |
+| AI Service | 사진 조회 (Vision 분석용) |
+
+---
+
 # 서비스별 Database
 
-| Service | PostgreSQL | Redis | InfluxDB | Elasticsearch |
-|----------|------------|--------|-----------|---------------|
-| Auth | O | O | X | X |
-| User | O | X | X | X |
-| Cultivation | O | X | X | X |
-| AI | X | O | X | X |
-| Embedding | X | X | X | O |
-| Datasource | O | X | X | X |
-| Rule Engine | X | X | X | X |
-| Sensor | X | O | O | X |
-| Notification | X | X | X | X |
+| Service | PostgreSQL | Redis | InfluxDB | Elasticsearch | MinIO |
+|----------|------------|--------|-----------|---------------|-------|
+| Auth | O | O | X | X | X |
+| User | O | X | X | X | X |
+| Cultivation | O | X | X | X | O |
+| AI | X | O | X | X | O |
+| Embedding | X | X | X | O | X |
+| Datasource | O | X | X | X | X |
+| Rule Engine | X | X | X | X | X |
+| Sensor | X | O | O | X | X |
+| Notification | X | X | X | X | X |
 
 ---
 

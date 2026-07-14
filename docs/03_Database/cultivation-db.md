@@ -55,6 +55,18 @@ FK  cultivation_id
     harvest_weight
     memo
     harvested_at
+
+          │ 1
+          │
+          │
+          ▼
+photo
+──────────────────────────────────────────────
+PK  id
+FK  cultivation_id
+    image_url
+    uploaded_at
+    created_at
 ```
 
 ---
@@ -109,6 +121,22 @@ AI 추천값은 저장하지 않습니다.
 | harvest_weight | DECIMAL(8,2) |
 | memo | TEXT |
 | harvested_at | TIMESTAMP |
+
+---
+
+## photo
+
+사용자가 직접 촬영하여 업로드한 생육 사진의 메타데이터입니다.
+
+이미지 원본은 MinIO에 저장하며, 이 테이블에는 URL만 저장합니다.
+
+| Column | Type |
+|---------|------|
+| id | BIGSERIAL |
+| cultivation_id | BIGINT |
+| image_url | VARCHAR(500) |
+| uploaded_at | TIMESTAMP |
+| created_at | TIMESTAMP |
 
 ---
 
@@ -198,6 +226,31 @@ CREATE TABLE harvest (
 
 ---
 
+## photo
+
+```sql
+CREATE TABLE photo (
+
+    id BIGSERIAL PRIMARY KEY,
+
+    cultivation_id BIGINT NOT NULL,
+
+    image_url VARCHAR(500) NOT NULL,
+
+    uploaded_at TIMESTAMP NOT NULL,
+
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_photo_cultivation
+        FOREIGN KEY (cultivation_id)
+        REFERENCES cultivation(id)
+        ON DELETE CASCADE
+
+);
+```
+
+---
+
 # Index
 
 ## cultivation
@@ -229,6 +282,22 @@ ON environment_setting(cultivation_id);
 CREATE UNIQUE INDEX uk_harvest_cultivation
 ON harvest(cultivation_id);
 ```
+
+---
+
+## photo
+
+```sql
+CREATE INDEX idx_photo_cultivation
+ON photo(cultivation_id);
+```
+
+```sql
+CREATE INDEX idx_photo_uploaded_at
+ON photo(uploaded_at);
+```
+
+가장 최근 업로드된 사진을 빠르게 조회하기 위해 cultivation_id와 uploaded_at을 함께 사용합니다.
 
 ---
 
@@ -327,6 +396,10 @@ Environment Setting
 ↓
 
 Harvest
+
+↓
+
+Photo (RUNNING 기간 중 언제든 업로드 가능)
 ```
 
 ---
@@ -338,3 +411,6 @@ Harvest
 - Environment Setting은 Cultivation당 하나만 존재합니다.
 - Harvest는 재배 종료 후에만 생성됩니다.
 - Sensor 데이터는 InfluxDB에서 관리하며 PostgreSQL에는 저장하지 않습니다.
+- 사진 원본 파일은 PostgreSQL이 아닌 MinIO에 저장하고, image_url만 저장합니다.
+- 사진은 카메라 센서가 아닌 사용자가 직접 촬영하여 업로드합니다.
+- 하나의 재배(cultivation)에는 여러 장의 photo가 누적될 수 있습니다.

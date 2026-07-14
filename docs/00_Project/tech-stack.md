@@ -120,5 +120,5 @@ Kubernetes Rolling Update
 
 ## Monitoring (예정)
 
-- Prometheus
+- OpenObserve
 - Grafana
