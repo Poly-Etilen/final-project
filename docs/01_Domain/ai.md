@@ -4,13 +4,17 @@
 
 AI Service는 LLM과 RAG(Retrieval-Augmented Generation)를 활용하여 사용자에게 지능형 서비스를 제공합니다.
 
-사용자의 재배 환경을 추천하고, 센서 데이터를 분석하여 생육 상태를 예측하며, AI 리포트와 챗봇 기능을 제공합니다.
+센서 데이터를 분석하여 생육 상태를 예측하며, AI 리포트와 챗봇 기능을 제공합니다.
+
+> ℹ️ **변경 이력**: 재배 환경 추천은 원래 AI Service가 Embedding/Vector Search/LLM을 통해
+> 생성했지만, 공공데이터 기준 버섯 종류가 5가지로 고정되어 있어 항상 같은 값이 나오는 조회에는
+> AI가 불필요하다고 판단해 Cultivation Service의 `mushroom_reference` 참조 테이블 조회로
+> 이전했습니다. AI Service는 더 이상 환경 추천을 담당하지 않습니다.
 
 ---
 
 # 책임
 
-- AI 환경 추천
 - AI 생육 분석
 - AI 챗봇
 - AI 리포트 생성
@@ -20,23 +24,6 @@ AI Service는 LLM과 RAG(Retrieval-Augmented Generation)를 활용하여 사용�
 ---
 
 # 주요 기능
-
-## AI 재배 환경 추천
-
-사용자가 재배하려는 버섯 종류를 입력하면
-Embedding Service를 통해 유사한 재배 데이터를 검색합니다.
-
-검색된 데이터를 기반으로 LLM이 최적의 환경을 생성합니다.
-
-추천 항목
-
-- 목표 온도
-- 목표 습도
-- 목표 CO₂ 농도
-- 목표 조도
-- 환기 주기
-
----
 
 ## AI 생육 분석
 
@@ -141,12 +128,6 @@ AI 리포트를 생성합니다.
 
 # API
 
-## 환경 추천
-
-POST /ai/environment
-
----
-
 ## 생육 분석
 
 POST /ai/analysis
@@ -177,7 +158,6 @@ AI 응답 캐시를 저장합니다.
 
 캐시 대상
 
-- 환경 추천 결과
 - AI 분석 결과
 - AI 리포트
 
@@ -197,7 +177,7 @@ AI Service는 Vision 분석을 위해 사진을 조회합니다.
 
 ### Embedding Service
 
-- 유사 환경 검색
+- AI 챗봇의 유사 재배 사례 검색 (선택적 호출)
 
 ---
 
@@ -213,7 +193,6 @@ AI Service는 Vision 분석을 위해 사진을 조회합니다.
 
 ### Cultivation Service
 
-- 환경 추천 요청
 - 생육 사진 Vision 분석 요청 (사진 URL 포함)
 
 ### API Gateway
@@ -242,57 +221,11 @@ Monthly Scheduler 기반 AI 리포트 생성이 완료되면 발행합니다.
 
 ---
 
-생육 분석(Vision), 환경 추천, 챗봇은 사용자 요청에 대한 동기 응답으로 결과가 즉시 전달되므로 별도 이벤트를 발행하지 않습니다.
+생육 분석(Vision), 챗봇은 사용자 요청에 대한 동기 응답으로 결과가 즉시 전달되므로 별도 이벤트를 발행하지 않습니다.
 
 ---
 
 # Sequence
-
-## AI 환경 추천
-
-Client
-
-↓
-
-Gateway
-
-↓
-
-Cultivation Service
-
-↓
-
-AI Service
-
-↓
-
-Embedding Service
-
-↓
-
-Elasticsearch
-
-↓
-
-유사 환경 검색
-
-↓
-
-LLM
-
-↓
-
-환경 추천 생성
-
-↓
-
-Cultivation Service
-
-↓
-
-Client
-
----
 
 ## AI 리포트 생성
 

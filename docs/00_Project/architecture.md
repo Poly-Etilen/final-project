@@ -37,6 +37,8 @@ Rule Engine Service와 Sensor Service는 RabbitMQ(EnvironmentMeasuredEvent)로�
 - Refresh Token
 - 이메일 인증
 - AI 응답 캐시
+- 목표 환경 범위 캐시 (Rule Engine Service)
+- 최신 센서 데이터 (Sensor Service)
 
 ---
 
@@ -80,13 +82,30 @@ Rule Engine Service와 Sensor Service는 RabbitMQ(EnvironmentMeasuredEvent)로�
 
 ## AI
 
-### 환경 추천 / 챗봇 / 리포트
+### 환경 추천 (Cultivation Service, AI 미사용)
+
+Cultivation Service
+
+↓
+
+mushroom_reference 조회 (PostgreSQL)
+
+↓
+
+환경 추천
+
+버섯 종류가 공공데이터 기준 5가지로 고정되어 있어 Vector Search/LLM 없이 Cultivation Service가
+직접 조회합니다.
+
+---
+
+### 챗봇 / 리포트
 
 Spring AI
 
 ↓
 
-Embedding Service
+Embedding Service (챗봇 유사 사례 검색, 선택적)
 
 ↓
 
@@ -98,7 +117,7 @@ LLM
 
 ↓
 
-환경 추천 / 챗봇 답변 / AI 리포트
+챗봇 답변 / AI 리포트
 
 ---
 

@@ -8,6 +8,12 @@ Rule Engine Service가 MQTT로 수신·검증한 데이터를 RabbitMQ(Environme
 Sensor Service가 이를 구독하여 InfluxDB에 저장합니다.
 대시보드 차트, 통계 조회, AI 분석 데이터 생성에 활용됩니다.
 
+센서가 1초 주기로 값을 보내더라도 InfluxDB에는 매초 기록하지 않고 **재배별로 10초 간격으로
+스로틀링**하여 저장합니다. 재배실 환경(온도/습도/CO₂/조도)은 물리적으로 초 단위로 급변하지
+않기 때문에 10초 해상도로도 이력/통계/AI 분석 품질에 문제가 없으며, 이를 통해 InfluxDB 저장
+용량을 약 1/10로 줄일 수 있습니다. 실시간성이 중요한 "현재값" 조회는 Redis가 매초 갱신을
+그대로 유지하므로 대시보드 체감 실시간성에는 영향이 없습니다.
+
 ---
 
 # 사용 서비스
@@ -93,7 +99,7 @@ DatasourceGenerator
 
 ↓
 
-MQTT
+MQTT (센서 발행 주기: 1초)
 
 ↓
 
@@ -101,11 +107,14 @@ Rule Engine Service (수신·검증·규칙평가)
 
 ↓
 
-RabbitMQ (EnvironmentMeasuredEvent)
+RabbitMQ (EnvironmentMeasuredEvent, 매초 발행)
 
 ↓
 
 Sensor Service
+
+├── Redis 저장 (매초, 항상)
+└── InfluxDB 저장 (재배별 10초 이상 경과했을 때만 — 스로틀링)
 
 ↓
 
@@ -225,14 +234,16 @@ InfluxDB 장애 발생 시
 
 - 센서 데이터는 수정하지 않습니다.
 - 모든 데이터는 Append Only 방식으로 저장합니다.
-- Redis는 현재 상태(Current State)를 관리합니다.
-- InfluxDB는 과거 이력(Historical Data)을 관리합니다.
+- Redis는 현재 상태(Current State)를 관리하며 매초 갱신됩니다.
+- InfluxDB는 과거 이력(Historical Data)을 관리하며 10초 간격으로 스로틀링되어 기록됩니다.
+- 스로틀링 기준(10초)은 초기값이며 재배/센서 타입별로 조정될 수 있습니다.
+- 스로틀링은 Sensor Service가 재배별 마지막 기록 시각을 메모리에서 관리하며 적용합니다. (자세한 내용은 [sensor.md](../01_Domain/sensor.md) 참고)
 
 ---
 
 # 추후 개발 예정
 
-- Downsampling
+- Downsampling (10초로 스로틀링된 데이터를 더 오래된 구간에서는 1분/1시간 단위로 추가 압축)
 - Continuous Query
 - Grafana 연동
 - 장기 통계 저장

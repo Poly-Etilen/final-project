@@ -45,15 +45,7 @@ Cultivation Service
 
 ↓
 
-AI Service
-
-↓
-
-Embedding Service
-
-↓
-
-LLM
+mushroom_reference 조회 (mushroom_type 기준)
 
 ↓
 
@@ -63,6 +55,8 @@ LLM
 
 Client
 
+AI Service를 호출하지 않고, Cultivation Service가 자체 보유한 참조 테이블을 조회합니다.
+
 ---
 
 ### Response
@@ -71,13 +65,17 @@ Client
 {
     "cultivationId": 1,
     "recommendedEnvironment": {
-        "temperature": 21,
-        "humidity": 90,
-        "co2": 800,
-        "light": 350
-    }
+        "temperature": {"min": 15.0, "max": 18.0},
+        "humidity": {"min": 85, "max": 95},
+        "co2": {"min": 700, "max": 900},
+        "light": {"min": 300, "max": 400}
+    },
+    "description": "느타리버섯은 서늘하고 다습한 환경에서 균사 활착이 빠릅니다."
 }
 ```
+
+추천값은 mushroom_reference에 저장된 범위를 그대로 반환합니다. 사용자가 이 범위를 참고해서
+아래 "환경 설정 저장"에서 실제 자동 제어 기준값을 직접 입력합니다.
 
 ---
 
@@ -85,7 +83,7 @@ Client
 
 ## PATCH /{cultivationId}/environment
 
-사용자가 AI 추천값을 수정하여 저장합니다.
+사용자가 추천값(mushroom_reference)을 참고하여 실제 자동 제어 기준값(위험 한계값)을 저장합니다.
 
 ### Request
 
@@ -107,6 +105,9 @@ Client
     "message":"Environment Saved"
 }
 ```
+
+저장 시 단일 목표값을 허용 오차만큼 확장한 범위(min~max)로 변환해 저장하고,
+RabbitMQ로 EnvironmentRangeUpdatedEvent를 발행합니다. (Rule Engine Service의 Redis 캐시 갱신용)
 
 ---
 
@@ -227,7 +228,7 @@ Client
 | C002 | 이미 종료된 재배 |
 | C003 | 권한 없음 |
 | C004 | 환경 저장 실패 |
-| C005 | AI 추천 실패 |
+| C005 | 지원하지 않는 버섯 종류 (mushroom_reference에 없음) |
 
 ---
 
@@ -246,3 +247,4 @@ Client
 
 - CultivationCreatedEvent
 - CultivationFinishedEvent
+- EnvironmentRangeUpdatedEvent

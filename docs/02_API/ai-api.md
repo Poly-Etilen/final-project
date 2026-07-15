@@ -18,57 +18,10 @@ Bearer JWT
 
 내부 서비스(Cultivation Service 등) 호출은 OpenFeign을 통해 이루어집니다.
 
----
-
-# 환경 추천
-
-## POST /environment
-
-버섯 종류를 기반으로 최적의 재배 환경을 추천합니다. (Vector Search 기반)
-
-### Request
-
-```json
-{
-    "mushroomType": "OYSTER"
-}
-```
-
----
-
-### Process
-
-AI Service
-
-↓
-
-Embedding Service
-
-↓
-
-Elasticsearch (Vector Search)
-
-↓
-
-Top-K 유사 환경 검색
-
-↓
-
-LLM
-
----
-
-### Response
-
-```json
-{
-    "temperature": 22,
-    "humidity": 90,
-    "co2": 800,
-    "light": 350,
-    "reason": "느타리버섯은 서늘하고 다습한 환경에서 균사 활착이 빠릅니다."
-}
-```
+> ℹ️ **변경 이력**: 환경 추천 API(`POST /environment`)는 제거되었습니다. 버섯 종류가 공공데이터
+> 기준 5가지로 고정되어 있어 Vector Search/LLM 없이도 항상 동일한 값이 나오므로, Cultivation
+> Service가 자체 참조 테이블(`mushroom_reference`)을 직접 조회하는 방식으로 이전했습니다.
+> 자세한 내용은 [cultivation-api.md](./cultivation-api.md)의 "재배 생성" 참고.
 
 ---
 
@@ -235,7 +188,7 @@ LLM
 
 | Code | Description |
 |------|-------------|
-| AI001 | Embedding 검색 실패 |
+| AI001 | Embedding 검색 실패 (챗봇 유사 사례 검색) |
 | AI002 | LLM 응답 실패 |
 | AI003 | Redis Cache 조회 실패 |
 | AI004 | Sensor 데이터 부족 |
@@ -250,14 +203,14 @@ LLM
 호출하는 서비스
 
 ```
-Embedding Service (유사 환경 검색)
+Embedding Service (챗봇 유사 재배 사례 검색, 선택적 호출)
 Sensor Service (센서 데이터/통계 조회)
 ```
 
 호출받는 서비스
 
 ```
-Cultivation Service (환경 추천, 생육 사진 Vision 분석 요청)
+Cultivation Service (생육 사진 Vision 분석 요청)
 API Gateway (AI 챗봇 요청)
 ```
 
@@ -267,7 +220,6 @@ API Gateway (AI 챗봇 요청)
 
 캐시 대상
 
-- 환경 추천 결과
 - AI 생육 분석 결과 (ai:{cultivationId}:analysis, TTL 6시간)
 - AI 챗봇 응답 (ai:{hash}, TTL 24시간)
 - AI 리포트 (report:{cultivationId}:{period}, TTL 24시간)

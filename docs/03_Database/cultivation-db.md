@@ -5,7 +5,7 @@
 Cultivation Database는 사용자의 버섯 재배 정보를 관리합니다.
 
 하나의 Cultivation은 하나의 재배를 의미하며,
-재배 생성 시 AI가 추천한 환경은 저장되지 않습니다.
+재배 생성 시 추천되는 환경값은 별도로 저장되지 않습니다.
 
 사용자가 추천값을 수정하거나 그대로 적용하여 저장 버튼을 눌렀을 때만
 Environment Setting이 생성됩니다. 이때 API로 주고받는 단일 목표값은 Cultivation Service에 의해
@@ -13,11 +13,33 @@ Environment Setting이 생성됩니다. 이때 API로 주고받는 단일 목표
 
 재배 종료 후에는 Harvest 정보를 저장합니다.
 
+> ℹ️ **변경 이력**: 재배 생성 시 보여주는 추천 환경값은 AI Service(Embedding/Vector Search/LLM)를
+> 호출해 생성하던 방식에서, 공공데이터 기반 5종 버섯의 최적 범위를 담은 `mushroom_reference`
+> 참조 테이블을 Cultivation Service가 직접 조회하는 방식으로 변경했습니다. 버섯 종류가 5가지로
+> 고정되어 있어 매번 동일한 값이 나오는 조회에는 벡터 검색/LLM이 필요하지 않다고 판단했습니다.
+> `mushroom_reference`는 사용자별 데이터가 아닌 전역 고정 시드 데이터이며, `environment_setting`
+> (사용자가 재배별로 직접 설정하는 위험 한계값)과는 별개의 테이블입니다.
+
 ---
 
 # ERD
 
 ```
+mushroom_reference (전역 참조 테이블, cultivation과 FK 관계 없음)
+──────────────────────────────────────────────
+PK  mushroom_type
+    temp_min
+    temp_max
+    humidity_min
+    humidity_max
+    co2_min
+    co2_max
+    light_min
+    light_max
+    description
+    created_at
+    updated_at
+
 cultivation
 ──────────────────────────────────────────────
 PK  id
@@ -77,6 +99,31 @@ FK  cultivation_id
 ---
 
 # Table
+
+## mushroom_reference
+
+공공데이터 기반으로 버섯 종류별 최적 생육 환경 **범위**를 담은 전역 참조 테이블입니다.
+
+특정 cultivation에 속하지 않는 고정 시드 데이터이며, 관리자가 데이터를 갱신하기 전까지는
+변하지 않습니다. 재배 생성 시 Cultivation Service가 이 테이블을 직접 조회하여 추천값으로
+보여주며, 이 값 자체는 environment_setting에 저장되지 않습니다.
+
+| Column | Type | Description |
+|---------|------|-------------|
+| mushroom_type | VARCHAR(50) | PK, 버섯 종류 |
+| temp_min | DECIMAL(4,1) | 최적 온도 하한 |
+| temp_max | DECIMAL(4,1) | 최적 온도 상한 |
+| humidity_min | DECIMAL(4,1) | 최적 습도 하한 |
+| humidity_max | DECIMAL(4,1) | 최적 습도 상한 |
+| co2_min | INT | 최적 CO₂ 하한 |
+| co2_max | INT | 최적 CO₂ 상한 |
+| light_min | INT | 최적 조도 하한 |
+| light_max | INT | 최적 조도 상한 |
+| description | VARCHAR(500) | 버섯별 생육 특성 설명 |
+| created_at | TIMESTAMP | 생성일 |
+| updated_at | TIMESTAMP | 수정일 |
+
+---
 
 ## cultivation
 
@@ -154,6 +201,51 @@ Cultivation Service가 저장 시점에 단일값을 범위로 변환합니다. 
 ---
 
 # DDL
+
+## mushroom_reference
+
+```sql
+CREATE TABLE mushroom_reference (
+
+    mushroom_type VARCHAR(50) PRIMARY KEY,
+
+    temp_min DECIMAL(4,1) NOT NULL,
+
+    temp_max DECIMAL(4,1) NOT NULL,
+
+    humidity_min DECIMAL(4,1) NOT NULL,
+
+    humidity_max DECIMAL(4,1) NOT NULL,
+
+    co2_min INT NOT NULL,
+
+    co2_max INT NOT NULL,
+
+    light_min INT NOT NULL,
+
+    light_max INT NOT NULL,
+
+    description VARCHAR(500),
+
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+
+);
+```
+
+시드 데이터 예시
+
+```sql
+INSERT INTO mushroom_reference
+    (mushroom_type, temp_min, temp_max, humidity_min, humidity_max, co2_min, co2_max, light_min, light_max, description)
+VALUES
+    ('OYSTER', 15.0, 18.0, 85, 95, 700, 900, 300, 400, '느타리버섯은 서늘하고 다습한 환경에서 균사 활착이 빠릅니다.');
+```
+
+공공데이터 기준 5종(느타리, 새송이, 표고, 팽이, 양송이 등) 데이터를 시드로 등록합니다.
+
+---
 
 ## cultivation
 
@@ -349,13 +441,14 @@ Cultivation 생성
 
 ↓
 
-AI Service 환경 추천
+mushroom_reference 조회 (mushroom_type 기준)
 
 ↓
 
-사용자에게 반환
+사용자에게 추천값(범위)으로 반환
 
-※ 아직 Database에는 저장하지 않습니다.
+※ mushroom_reference는 Cultivation Service 자체 조회이며, AI Service를 호출하지 않습니다.
+추천값 자체는 아직 environment_setting에 저장하지 않습니다.
 
 ---
 
@@ -443,8 +536,10 @@ Photo (RUNNING 기간 중 언제든 업로드 가능)
 
 # 고려 사항
 
-- AI 추천 환경은 Database에 저장하지 않습니다.
-- 사용자가 저장한 환경만 저장합니다.
+- 추천 환경(mushroom_reference 조회 결과)은 Database에 별도로 저장하지 않습니다.
+- 사용자가 저장한 환경(environment_setting)만 저장합니다.
+- mushroom_reference는 "최적 생육 범위"(참고용 추천 데이터), environment_setting은 "위험 한계값"(실제 자동 제어 기준)으로 목적이 다릅니다. Rule Engine Service는 mushroom_reference를 직접 참조하지 않고, 항상 environment_setting(및 그 Redis 캐시)만 사용합니다.
+- mushroom_reference는 cultivation_id가 없는 전역 테이블이며, 버섯 종류가 5종으로 고정되어 있어 관리자가 값을 갱신하기 전까지 정적으로 유지됩니다.
 - environment_setting은 단일 목표값이 아닌 범위(min~max)로 저장합니다. Rule Engine Service가 범위를 벗어날 때만 장치를 제어하도록 하여 불필요한 On/Off를 줄이기 위함입니다.
 - 단일값 → 범위 변환은 Cultivation Service 내부 로직이며, API 요청/응답 스펙에는 영향을 주지 않습니다.
 - Environment Setting은 Cultivation당 하나만 존재합니다.

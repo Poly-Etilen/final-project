@@ -4,8 +4,13 @@
 
 사용자가 새로운 버섯 재배를 시작하는 과정입니다.
 
-재배 생성 시 AI는 버섯 종류에 맞는 최적의 환경을 추천하며,
-사용자가 추천값을 수정하거나 그대로 저장하면 재배가 시작됩니다.
+재배 생성 시 Cultivation Service는 공공데이터 기반 참조 테이블(`mushroom_reference`)에서
+버섯 종류에 맞는 최적 환경 범위를 조회하여 추천하며,
+사용자가 추천값을 참고해 직접 환경 설정(위험 한계값)을 입력하고 저장하면 재배가 시작됩니다.
+
+> ℹ️ **변경 이력**: 원래는 AI Service(Embedding/Vector Search/LLM)를 호출해 추천값을 생성했지만,
+> 버섯 종류가 공공데이터 기준 5가지로 고정되어 있어 매번 동일한 값이 나오는 조회에는 AI가
+> 불필요하다고 판단, Cultivation Service가 자체 보유한 참조 테이블 조회로 단순화했습니다.
 
 ---
 
@@ -32,35 +37,11 @@ Cultivation 생성
 
 ↓
 
-AI Service
-
-↓
-
-Embedding Service
-
-↓
-
-Elasticsearch
-
-↓
-
-유사 환경 검색
-
-↓
-
-AI Service
-
-↓
-
-LLM
+mushroom_reference 조회 (mushroom_type 기준)
 
 ↓
 
 환경 추천 생성
-
-↓
-
-Cultivation Service
 
 ↓
 
@@ -127,93 +108,32 @@ CREATED
 
 ---
 
-## 3. AI 추천 요청
+## 3. 참조 테이블 조회
 
-Cultivation Service
+Cultivation Service는
 
-↓
+`mushroom_reference` 테이블을 `mushroom_type`으로 조회합니다. (내부 Repository 조회, 외부 서비스 호출 없음)
 
-OpenFeign
-
-↓
-
-AI Service
-
-전달 데이터
+조회 결과 예시
 
 ```json
 {
-    "mushroomType":"OYSTER"
+    "mushroomType": "OYSTER",
+    "tempMin": 15.0,
+    "tempMax": 18.0,
+    "humidityMin": 85,
+    "humidityMax": 95,
+    "co2Min": 700,
+    "co2Max": 900,
+    "lightMin": 300,
+    "lightMax": 400,
+    "description": "느타리버섯은 서늘하고 다습한 환경에서 균사 활착이 빠릅니다."
 }
 ```
 
 ---
 
-## 4. Embedding 검색
-
-AI Service
-
-↓
-
-Embedding Service
-
-↓
-
-Embedding 생성
-
-↓
-
-Elasticsearch
-
-↓
-
-Vector Search
-
-↓
-
-Top K 검색
-
-예시
-
-```
-Top 5
-```
-
-유사 환경 반환
-
----
-
-## 5. LLM 환경 추천
-
-AI Service
-
-↓
-
-LLM
-
-입력
-
-- 버섯 종류
-- Vector Search 결과
-
-출력
-
-```json
-{
-    "temperature":22,
-    "humidity":91,
-    "co2":850,
-    "light":420
-}
-```
-
----
-
-## 6. 추천 결과 반환
-
-AI Service
-
-↓
+## 4. 추천 결과 반환
 
 Cultivation Service
 
@@ -221,24 +141,39 @@ Cultivation Service
 
 Client
 
-사용자는 추천 환경을 확인합니다.
+응답 예시
+
+```json
+{
+    "cultivationId": 1,
+    "recommendedEnvironment": {
+        "temperature": {"min": 15.0, "max": 18.0},
+        "humidity": {"min": 85, "max": 95},
+        "co2": {"min": 700, "max": 900},
+        "light": {"min": 300, "max": 400}
+    },
+    "description": "느타리버섯은 서늘하고 다습한 환경에서 균사 활착이 빠릅니다."
+}
+```
+
+사용자는 이 추천 범위를 참고 자료로 확인합니다.
 
 ---
 
-## 7. 환경 수정
+## 5. 환경 수정
 
-사용자는
+사용자는 추천 범위(mushroom_reference)를 참고하여
 
 - Temperature
 - Humidity
 - CO₂
 - Light
 
-를 수정할 수 있습니다.
+목표값을 직접 입력/수정합니다. 이 값이 실제 자동 제어의 기준(위험 한계값)이 됩니다.
 
 ---
 
-## 8. 환경 저장
+## 6. 환경 저장
 
 사용자가
 
@@ -267,9 +202,18 @@ Humidity 91% → humidity_min 86 / humidity_max 96
 
 API 요청/응답에는 단일 목표값만 노출되며, 범위 변환은 Cultivation Service 내부 저장 로직입니다.
 
+↓
+
+RabbitMQ Publish (EnvironmentRangeUpdatedEvent)
+
+↓
+
+Rule Engine Service가 구독하여 Redis 캐시(cultivation:{cultivationId}:range)를 갱신합니다.
+규칙 평가 시 Cultivation Service를 매번 호출하지 않기 위한 캐시 예열(warm-up) 목적입니다.
+
 ---
 
-## 9. 재배 시작
+## 7. 재배 시작
 
 Cultivation 상태 변경
 
@@ -290,6 +234,8 @@ RUNNING
 ## PostgreSQL
 
 ```
+mushroom_reference (조회 전용)
+
 cultivation
 
 environment_setting
@@ -297,34 +243,29 @@ environment_setting
 
 ---
 
-## Elasticsearch
-
-Vector Search
-
----
-
 # OpenFeign
 
-```
-Cultivation
-
-↓
-
-AI
-
-↓
-
-Embedding
-```
+재배 생성/환경 추천 단계에서는 다른 서비스를 호출하지 않습니다. (Cultivation Service 내부 조회로 완결)
 
 ---
 
 # RabbitMQ
 
-사용하지 않습니다.
+재배 생성 자체(참조 테이블 조회 등)는 사용자 응답이 필요한 기능이므로 동기 방식(내부 DB 조회)으로 처리합니다.
 
-재배 생성은 사용자 응답이 필요한 기능이므로
-동기 방식(OpenFeign)으로 처리합니다.
+환경 저장(6단계) 시점에는 비동기로 아래 이벤트를 발행합니다.
+
+Publish
+
+```
+EnvironmentRangeUpdatedEvent
+```
+
+Subscribe
+
+```
+Rule Engine Service (Redis 캐시 갱신)
+```
 
 ---
 
@@ -360,19 +301,19 @@ FINISHED
 
 # 예외 상황
 
-- 존재하지 않는 버섯 종류
-- AI 추천 실패
-- Elasticsearch 검색 실패
-- LLM 응답 실패
+- 존재하지 않는 버섯 종류 (mushroom_reference에 없음)
 - Environment 저장 실패
 - DB 저장 실패
+- EnvironmentRangeUpdatedEvent 발행 실패 (Rule Engine Service 캐시가 갱신되지 않으며, Rule Engine Service는 다음 규칙 평가 시 Cultivation Service를 직접 호출하는 fallback으로 동작)
 
 ---
 
 # 고려 사항
 
-- AI 추천 환경은 Database에 저장하지 않습니다.
-- 사용자가 최종 저장한 환경만 저장합니다.
+- 추천 환경(mushroom_reference 조회 결과)은 Database에 별도로 저장하지 않습니다.
+- 사용자가 최종 저장한 환경(environment_setting)만 저장합니다.
+- mushroom_reference는 "최적 범위"(참고용), environment_setting은 "위험 한계값"(자동 제어 기준)으로 목적이 다릅니다.
 - 저장 시 단일 목표값은 허용 오차만큼 확장된 범위(min~max)로 변환되어 저장됩니다. API 스펙은 단일값을 그대로 유지합니다.
+- 환경 저장 응답은 EnvironmentRangeUpdatedEvent 발행(비동기)을 기다리지 않고 즉시 반환합니다.
 - 재배는 환경 저장 이후 RUNNING 상태가 됩니다.
-- Embedding 검색 실패 시 기본 프롬프트를 사용하여 AI 추천을 수행합니다.
+- 참조 테이블 조회는 Cultivation Service 내부 DB 조회이므로 AI Service/Embedding Service/Elasticsearch에 대한 의존성이 없습니다.

@@ -38,6 +38,32 @@ EnvironmentControlEvent → Notification Service (자동 제어가 발생했을 
 SensorErrorEvent → DatasourceGenerator, Notification Service (센서 오류 감지 시 발행)
 ```
 
+Subscribe
+
+```
+EnvironmentRangeUpdatedEvent (Cultivation Service 발행) → Redis 캐시(cultivation:{cultivationId}:range) 갱신
+```
+
+---
+
+# Redis
+
+목표 환경 범위 캐시 전용입니다. 측정값 저장은 Sensor Service의 Redis(별도 키 공간)를 사용합니다.
+
+Key
+
+```
+cultivation:{cultivationId}:range
+```
+
+TTL
+
+```
+24시간 (EnvironmentRangeUpdatedEvent 수신 시마다 연장)
+```
+
+자세한 값 구조는 [rule-Engine.md](../01_Domain/rule-Engine.md)의 Redis 섹션을 참고하세요.
+
 ---
 
 # OpenFeign
@@ -45,7 +71,7 @@ SensorErrorEvent → DatasourceGenerator, Notification Service (센서 오류 �
 호출하는 서비스
 
 ```
-Cultivation Service (규칙 평가 시 목표 환경 범위(min~max) 조회)
+Cultivation Service (Redis 캐시 미스 시에만 호출하는 fallback — 목표 환경 범위(min~max) 조회)
 ```
 
 호출받는 서비스
@@ -65,4 +91,6 @@ Rule Engine Service의 내부 처리 오류는 로그/모니터링으로 관리�
 | MQTT Broker 연결 실패 | 센서 데이터 수신 불가 |
 | 규칙 평가 실패 | 목표 환경 범위 조회 실패 등 |
 | 장치 제어 실패 | 자동 제어 명령 전달 실패 |
+| Redis 캐시 조회/저장 실패 | 목표 환경 범위 캐시 사용 불가, Cultivation Service fallback 호출 증가 |
 | RabbitMQ 발행 실패 | Sensor Service/Notification Service 전달 실패 |
+| RabbitMQ 구독 실패 | EnvironmentRangeUpdatedEvent를 못 받아 캐시가 최신화되지 않음 |

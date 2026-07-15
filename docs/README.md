@@ -38,10 +38,10 @@ API Gateway를 포함해 9개 서비스로 구성됩니다. (기존 9개 서비�
 |--------|-----------|--------|-----|----------|----------------|
 | API Gateway | 라우팅, 인증 토큰 검증 | - | - | - | 전체 시퀀스 최초 진입점 |
 | Auth | 인증/인가, JWT, 이메일 인증, 회원 프로필/탈퇴/재배 통계 (기존 Auth+User 통합) | [auth.md](./01_Domain/auth.md) | [auth-api.md](./02_API/auth-api.md) | [auth-db.md](./03_Database/auth-db.md) | [signup](./04_sequence/signup.md), [login](./04_sequence/login.md), [withdraw](./04_sequence/withdraw.md) |
-| Cultivation | 재배 생성/관리/수확/사진 업로드 | [cultivation.md](./01_Domain/cultivation.md) | [cultivation-api.md](./02_API/cultivation-api.md) | [cultivation-db.md](./03_Database/cultivation-db.md) | [create-cultivation](./04_sequence/create-cultivation.md), [harvest](./04_sequence/harvest.md), [growth-analysis](./04_sequence/growth-analysis.md) |
-| AI | 환경 추천, 생육 분석(Vision), 챗봇, 리포트 | [ai.md](./01_Domain/ai.md) | [ai-api.md](./02_API/ai-api.md) | Redis(캐시), MinIO(읽기 전용) | [growth-analysis](./04_sequence/growth-analysis.md), [harvest](./04_sequence/harvest.md), [ai-chat](./04_sequence/ai-chat.md), [ai-report](./04_sequence/ai-report.md) |
-| Embedding | 재배 참조 데이터 임베딩·벡터 검색 | [embedding.md](./01_Domain/embedding.md) | [embedding-api.md](./02_API/embedding-api.md) | [elasticSearch.md](./03_Database/elasticSearch.md) | [create-cultivation](./04_sequence/create-cultivation.md) |
-| Rule Engine | MQTT 수신(Collector), 검증, 규칙 평가/자동 제어, 센서 오류 감지 | [rule-Engine.md](./01_Domain/rule-Engine.md) | API 없음 (MQTT/RabbitMQ 기반, [rule-engine-api.md](./02_API/rule-engine-api.md) 참고) | 없음 (Cultivation Service를 매번 OpenFeign 조회) | [sensor-data](./04_sequence/sensor-data.md), [environment-control](./04_sequence/environment-control.md), [sensor-error](./04_sequence/sensor-error.md) |
+| Cultivation | 재배 생성/관리/수확/사진 업로드, 공공데이터 기반 환경 추천(`mushroom_reference` 조회) | [cultivation.md](./01_Domain/cultivation.md) | [cultivation-api.md](./02_API/cultivation-api.md) | [cultivation-db.md](./03_Database/cultivation-db.md) | [create-cultivation](./04_sequence/create-cultivation.md), [harvest](./04_sequence/harvest.md), [growth-analysis](./04_sequence/growth-analysis.md) |
+| AI | 생육 분석(Vision), 챗봇, 리포트 | [ai.md](./01_Domain/ai.md) | [ai-api.md](./02_API/ai-api.md) | Redis(캐시), MinIO(읽기 전용) | [growth-analysis](./04_sequence/growth-analysis.md), [harvest](./04_sequence/harvest.md), [ai-chat](./04_sequence/ai-chat.md), [ai-report](./04_sequence/ai-report.md) |
+| Embedding | 재배 참조 데이터 임베딩·벡터 검색 (AI 챗봇 유사 사례 검색용) | [embedding.md](./01_Domain/embedding.md) | [embedding-api.md](./02_API/embedding-api.md) | [elasticSearch.md](./03_Database/elasticSearch.md) | [ai-chat](./04_sequence/ai-chat.md) |
+| Rule Engine | MQTT 수신(Collector), 검증, 규칙 평가/자동 제어, 센서 오류 감지 | [rule-Engine.md](./01_Domain/rule-Engine.md) | API 없음 (MQTT/RabbitMQ 기반, [rule-engine-api.md](./02_API/rule-engine-api.md) 참고) | Redis(목표 환경 범위 캐시만, 영구 저장소 없음) | [sensor-data](./04_sequence/sensor-data.md), [environment-control](./04_sequence/environment-control.md), [sensor-error](./04_sequence/sensor-error.md) |
 | Sensor | 측정값 저장(Redis/InfluxDB)·조회·통계·주간월간 리포트 집계 | [sensor.md](./01_Domain/sensor.md) | [sensor-api.md](./02_API/sensor-api.md) | [influxdb.md](./03_Database/influxdb.md), [redis.md](./03_Database/redis.md) | [sensor-data](./04_sequence/sensor-data.md), [environment-control](./04_sequence/environment-control.md) |
 | Notification | WebSocket/Telegram/Discord 알림 | [notification.md](./01_Domain/notification.md) | API 없음 (RabbitMQ 기반) | 없음 | [environment-control](./04_sequence/environment-control.md), [harvest](./04_sequence/harvest.md), [sensor-error](./04_sequence/sensor-error.md) |
 | DatasourceGenerator | IoT 장치/센서 메타데이터 관리, 시뮬레이션 데이터 발행 (기존 Datasource Service 리네임) | [datasource-generator.md](./01_Domain/datasource-generator.md) | [datasource-generator-api.md](./02_API/datasource-generator-api.md) | [datasource-generator-db.md](./03_Database/datasource-generator-db.md) | [sensor-data](./04_sequence/sensor-data.md), [sensor-error](./04_sequence/sensor-error.md) |
@@ -89,6 +89,36 @@ Rule Engine Service의 자동 제어가 값이 범위를 벗어날 때만 장치
 - Cultivation Service가 저장 시점에 단일 목표값에 허용 오차를 적용해 범위로 변환합니다. (예: 온도 22℃ ± 1.5℃ → temp_min 20.5 / temp_max 23.5)
 - 컬럼명은 `temp_min`/`temp_max`, `humidity_min`/`humidity_max`, `co2_min`/`co2_max`, `light_min`/`light_max`입니다.
 - Rule Engine Service는 현재 센서값이 이 범위를 벗어날 때만 장치를 제어합니다. (자세한 내용은 [cultivation-db.md](./03_Database/cultivation-db.md), [rule-Engine.md](./01_Domain/rule-Engine.md) 참고)
+
+### 7. Rule Engine Service가 목표 환경 범위를 Redis에 캐싱한다
+처음에는 규칙 평가 때마다(센서 데이터 수신마다) Cultivation Service를 OpenFeign으로 매번 동기 호출했지만,
+호출 빈도가 너무 높아 Cultivation Service에 부하가 몰리고 장애 시 자동 제어까지 막히는 문제가 있어
+Redis 캐시를 도입했습니다.
+
+- 캐시 키: `cultivation:{cultivationId}:range`, TTL 24시간
+- Cultivation Service가 environment_setting을 생성/수정할 때 `EnvironmentRangeUpdatedEvent`를 발행하고, Rule Engine Service가 이를 구독해 캐시를 미리 채워둡니다(write-through). 규칙 평가 시에는 이 캐시를 먼저 조회합니다.
+- 캐시가 없을 때(TTL 만료, 서비스 재시작 직후 등)만 Cultivation Service를 OpenFeign으로 호출하는 fallback으로 동작합니다.
+- 이 Redis는 Sensor Service의 "최신 센서값" 캐시와는 별개이며, Rule Engine Service는 여전히 PostgreSQL/InfluxDB 같은 영구 저장소는 갖지 않습니다. (자세한 내용은 [rule-Engine.md](./01_Domain/rule-Engine.md), [redis.md](./03_Database/redis.md) 참고)
+
+### 8. 센서 데이터 저장 시 Redis는 실시간(매초), InfluxDB는 10초로 스로틀링
+센서가 1초 주기로 값을 보내는 걸 그대로 InfluxDB에 다 기록하면 재배 1건 기준 한 달에 수백 MB,
+장기 누적 시 용량이 부담스러워집니다. 반면 재배실 환경(온도/습도/CO₂/조도)은 물리적으로 초 단위로
+급변하지 않으므로, 저장 주기와 제어 반응 주기를 분리했습니다.
+
+- **Rule Engine Service의 규칙 평가/자동 제어는 매초 원본 데이터로 그대로 수행**합니다. 반응 속도에는 영향이 없습니다.
+- **Sensor Service의 Redis(현재값 캐시)는 EnvironmentMeasuredEvent를 받을 때마다(매초) 항상 덮어씁니다.** 값 1건만 유지하는 구조라 매초 갱신해도 용량에 영향이 없고, 대시보드 체감 실시간성도 그대로 유지됩니다.
+- **Sensor Service의 InfluxDB(이력 저장)만 재배별로 10초 이상 지났을 때만 기록**합니다. 저장 용량을 약 1/10로 줄일 수 있습니다.
+- 마지막 InfluxDB 기록 시각은 Sensor Service가 재배별로 애플리케이션 메모리에서 관리합니다. (자세한 내용은 [sensor.md](./01_Domain/sensor.md), [influxdb.md](./03_Database/influxdb.md) 참고)
+
+### 9. 환경 추천은 AI Service가 아닌 Cultivation Service가 담당한다 (참조 테이블 조회)
+공공데이터로 확보한 버섯 재배 참조 데이터가 5종류뿐이라, AI Service가 Embedding/Vector
+Search/LLM을 거쳐도 항상 같은 값이 나오는 문제가 있었습니다. 이 조회에는 AI가 필요 없다고
+판단해 담당을 옮겼습니다.
+
+- Cultivation Service DB에 `mushroom_reference`라는 전역 참조 테이블을 신설했습니다. (`mushroom_type`별 최적 환경 범위 + 설명, 공공데이터 기반 시드 데이터, cultivation과 FK 관계 없음)
+- 재배 생성 시 Cultivation Service가 이 테이블을 **내부에서 직접 조회**하며, AI Service·Embedding Service·Elasticsearch·LLM을 전혀 호출하지 않습니다.
+- **`mushroom_reference`(최적 범위)와 `environment_setting`(위험 한계값)은 서로 다른 개념입니다.** 전자는 "이 조건이면 잘 자란다"는 참고용 추천 데이터이고, 후자는 사용자가 직접 정하는 자동 제어 기준값입니다. Rule Engine Service는 지금까지와 동일하게 `environment_setting`(및 그 Redis 캐시)만 사용하며, `mushroom_reference`를 직접 참조하지 않습니다.
+- AI Service는 더 이상 "환경 추천" 책임을 갖지 않습니다. (생육 분석/챗봇/리포트는 그대로 유지) Embedding Service/Elasticsearch는 AI 챗봇의 선택적 유사 사례 검색 용도로만 남아있습니다. (자세한 내용은 [cultivation-db.md](./03_Database/cultivation-db.md), [cultivation.md](./01_Domain/cultivation.md), [ai.md](./01_Domain/ai.md) 참고)
 
 ---
 

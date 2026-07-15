@@ -130,8 +130,10 @@ mushroom_environment
 
 ### AI Service
 
-- 환경 추천 요청
-- 벡터 검색 요청
+- AI 챗봇의 유사 재배 사례 검색 요청 (선택적 호출)
+
+> ℹ️ **변경 이력**: 재배 생성 시의 환경 추천 요청은 더 이상 들어오지 않습니다. Cultivation
+> Service가 자체 참조 테이블(mushroom_reference)을 직접 조회하는 방식으로 대체되었습니다.
 
 ### DatasourceGenerator (선택)
 
@@ -155,7 +157,7 @@ mushroom_environment
 
 # Sequence
 
-## 환경 검색
+## 챗봇 유사 사례 검색
 
 AI Service
 
@@ -185,7 +187,7 @@ LLM
 
 ↓
 
-환경 추천
+챗봇 답변
 
 ---
 
