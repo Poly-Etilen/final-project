@@ -4,9 +4,11 @@
 
 센서에서 생성된 환경 데이터를 실시간으로 수집하고 저장하는 과정입니다.
 
-Rule Engine Service가 MQTT 수신부터 검증, Redis(현재 상태)/InfluxDB(시계열 데이터) 저장까지
-하나의 서비스에서 처리합니다. (기존에는 Rule Engine이 검증 후 RabbitMQ로 별도의
-Sensor Service에 저장을 위임했으나, 서비스 통합으로 내부 처리로 단순화되었습니다.)
+Rule Engine Service가 MQTT 수신과 검증을 담당하고, RabbitMQ(EnvironmentMeasuredEvent)로
+전달하면 Sensor Service가 이를 구독하여 Redis(현재 상태)/InfluxDB(시계열 데이터)에 저장합니다.
+
+> ℹ️ **변경 이력**: 한때 Rule Engine Service가 검증 후 내부 로직으로 즉시 저장하는 방식(단일 서비스
+> 통합)을 검토했었지만, 저장·조회 책임을 다시 Sensor Service로 분리하고 RabbitMQ로 연결했습니다.
 
 저장된 데이터는 대시보드와 AI 분석에 활용됩니다.
 
@@ -29,7 +31,18 @@ MQTT Broker
 
 Rule Engine Service
 
-├── 데이터 검증
+↓
+
+데이터 검증
+
+↓
+
+RabbitMQ (EnvironmentMeasuredEvent)
+
+↓
+
+Sensor Service
+
 ├── Redis 저장
 └── InfluxDB 저장
 
@@ -91,11 +104,41 @@ MQTT Topic을 Subscribe합니다.
 
 ↓
 
-같은 서비스 내부에서 즉시 저장 처리
+RabbitMQ Publish
 
 ---
 
-## 4. Redis 저장
+## 4. RabbitMQ Publish
+
+Rule Engine Service는
+
+EnvironmentMeasuredEvent를 발행합니다.
+
+```json
+{
+    "cultivationId":3,
+    "sensorId":1,
+    "temperature":22.4,
+    "humidity":91.5,
+    "co2":810,
+    "light":420,
+    "measuredAt":"2026-08-15T12:30:00"
+}
+```
+
+---
+
+## 5. Sensor Service 저장
+
+RabbitMQ를 Subscribe합니다.
+
+↓
+
+센서 데이터를 저장합니다.
+
+---
+
+## 6. Redis 저장
 
 최신 환경 데이터를 저장합니다.
 
@@ -121,7 +164,7 @@ Value
 
 ---
 
-## 5. InfluxDB 저장
+## 7. InfluxDB 저장
 
 Measurement
 
@@ -149,13 +192,13 @@ Timestamp
 
 ---
 
-## 6. Dashboard 조회
+## 8. Dashboard 조회
 
 사용자가 대시보드를 조회합니다.
 
 ↓
 
-Rule Engine Service
+Sensor Service
 
 ↓
 
@@ -167,13 +210,13 @@ Redis 조회
 
 ---
 
-## 7. 차트 조회
+## 9. 차트 조회
 
 사용자가 기간별 차트를 요청합니다.
 
 ↓
 
-Rule Engine Service
+Sensor Service
 
 ↓
 
@@ -189,13 +232,13 @@ InfluxDB 조회
 
 ## Redis
 
-최신 환경 데이터 저장
+최신 환경 데이터 저장 (Sensor Service)
 
 ---
 
 ## InfluxDB
 
-센서 이력 저장
+센서 이력 저장 (Sensor Service)
 
 ---
 
@@ -207,16 +250,25 @@ Subscribe
 sensor/{cultivationId}
 ```
 
-DatasourceGenerator가 발행한 데이터를 Rule Engine Service가 직접 구독하여 검증과 저장까지 처리합니다.
+DatasourceGenerator가 발행한 데이터를 Rule Engine Service가 구독하여 검증합니다.
 
 ---
 
 # RabbitMQ
 
-사용하지 않습니다.
+Publish
 
-기존에는 검증 후 EnvironmentMeasuredEvent를 RabbitMQ로 발행해 Sensor Service에 전달했으나,
-서비스 통합으로 별도 이벤트 없이 내부에서 바로 저장합니다.
+```
+EnvironmentMeasuredEvent
+```
+
+Subscribe
+
+```
+Sensor Service
+```
+
+Rule Engine Service(검증)와 Sensor Service(저장)는 RabbitMQ로만 연결되며 서로 직접 호출하지 않습니다.
 
 ---
 
@@ -269,6 +321,7 @@ InfluxDB
 # 예외 상황
 
 - MQTT Broker 연결 실패
+- RabbitMQ 발행/구독 실패
 - Redis 저장 실패
 - InfluxDB 저장 실패
 - Dashboard 조회 실패
@@ -279,5 +332,6 @@ InfluxDB
 
 - Redis에는 항상 최신 데이터만 유지합니다.
 - InfluxDB에는 모든 센서 데이터를 저장합니다.
-- Dashboard는 현재 상태와 이력을 각각 다른 저장소에서 조회하지만, 조회 창구는 Rule Engine Service 하나입니다.
+- Dashboard는 현재 상태와 이력을 각각 다른 저장소에서 조회하며, 조회 창구는 Sensor Service입니다.
 - AI 분석은 Redis가 아닌 InfluxDB 데이터를 기반으로 수행합니다.
+- Rule Engine Service(검증·규칙평가)와 Sensor Service(저장·조회)는 서로 다른 서비스이며 RabbitMQ로만 연결됩니다.

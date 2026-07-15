@@ -4,7 +4,8 @@
 
 InfluxDB는 버섯 재배 과정에서 발생하는 센서 데이터를 시계열(Time Series) 형태로 저장합니다.
 
-Rule Engine Service가 MQTT로 수신한 데이터를 InfluxDB에 직접 저장하며,
+Rule Engine Service가 MQTT로 수신·검증한 데이터를 RabbitMQ(EnvironmentMeasuredEvent)로 전달하면,
+Sensor Service가 이를 구독하여 InfluxDB에 저장합니다.
 대시보드 차트, 통계 조회, AI 분석 데이터 생성에 활용됩니다.
 
 ---
@@ -13,7 +14,7 @@ Rule Engine Service가 MQTT로 수신한 데이터를 InfluxDB에 직접 저장�
 
 | Service | 역할 |
 |----------|------|
-| Rule Engine Service | 센서 데이터 저장 및 조회 (기존 Sensor Service 역할 포함) |
+| Sensor Service | 센서 데이터 저장 및 조회 |
 | AI Service | 주간/월간 데이터 분석 |
 
 ---
@@ -96,7 +97,15 @@ MQTT
 
 ↓
 
-Rule Engine Service (수신·규칙평가·저장을 하나의 서비스가 처리)
+Rule Engine Service (수신·검증·규칙평가)
+
+↓
+
+RabbitMQ (EnvironmentMeasuredEvent)
+
+↓
+
+Sensor Service
 
 ↓
 

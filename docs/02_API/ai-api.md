@@ -163,7 +163,7 @@ Redis 캐시 조회 (ai:{hash})
 
 ↓
 
-Cache Miss 시 Rule Engine Service 조회 + Embedding Service 유사 사례 검색 (선택)
+Cache Miss 시 Sensor Service 조회 + Embedding Service 유사 사례 검색 (선택)
 
 ↓
 
@@ -208,7 +208,7 @@ Redis 캐시 조회 (report:{cultivationId}:{period})
 
 ↓
 
-Cache Miss 시 Rule Engine Service 통계 조회 (InfluxDB)
+Cache Miss 시 Sensor Service 통계 조회 (InfluxDB)
 
 ↓
 
@@ -251,7 +251,7 @@ LLM
 
 ```
 Embedding Service (유사 환경 검색)
-Rule Engine Service (센서 데이터/통계 조회)
+Sensor Service (센서 데이터/통계 조회)
 ```
 
 호출받는 서비스

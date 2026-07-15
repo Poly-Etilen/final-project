@@ -236,7 +236,7 @@ Client
 사용 서비스
 
 - AI Service
-- Rule Engine Service
+- Sensor Service
 
 ---
 

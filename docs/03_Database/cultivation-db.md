@@ -8,7 +8,8 @@ Cultivation Database는 사용자의 버섯 재배 정보를 관리합니다.
 재배 생성 시 AI가 추천한 환경은 저장되지 않습니다.
 
 사용자가 추천값을 수정하거나 그대로 적용하여 저장 버튼을 눌렀을 때만
-Environment Setting이 생성됩니다.
+Environment Setting이 생성됩니다. 이때 API로 주고받는 단일 목표값은 Cultivation Service에 의해
+범위(min~max)로 변환되어 저장됩니다.
 
 재배 종료 후에는 Harvest 정보를 저장합니다.
 
@@ -37,10 +38,14 @@ environment_setting
 ──────────────────────────────────────────────
 PK  id
 FK  cultivation_id
-    target_temperature
-    target_humidity
-    target_co2
-    target_light
+    temp_min
+    temp_max
+    humidity_min
+    humidity_max
+    co2_min
+    co2_max
+    light_min
+    light_max
     created_at
     updated_at
 
@@ -93,18 +98,26 @@ FK  cultivation_id
 
 ## environment_setting
 
-사용자가 최종 저장한 환경값입니다.
+사용자가 최종 저장한 환경값을 **범위(min~max)** 로 저장합니다.
 
-AI 추천값은 저장하지 않습니다.
+단일 목표값이 아닌 범위로 저장하는 이유는 Rule Engine Service의 자동 제어가
+값이 범위를 벗어날 때만 장치를 동작시키고, 범위 안에서는 불필요하게 켜고 끄지 않도록(허용 오차/히스테리시스) 하기 위함입니다.
+
+AI 추천값 자체는 저장하지 않습니다. (API/AI 추천 응답은 여전히 단일 목표값을 사용하며,
+Cultivation Service가 저장 시점에 단일값을 범위로 변환합니다. 아래 "단일값 → 범위 변환" 참고)
 
 | Column | Type |
 |---------|------|
 | id | BIGSERIAL |
 | cultivation_id | BIGINT |
-| target_temperature | DECIMAL(4,1) |
-| target_humidity | DECIMAL(4,1) |
-| target_co2 | INT |
-| target_light | INT |
+| temp_min | DECIMAL(4,1) |
+| temp_max | DECIMAL(4,1) |
+| humidity_min | DECIMAL(4,1) |
+| humidity_max | DECIMAL(4,1) |
+| co2_min | INT |
+| co2_max | INT |
+| light_min | INT |
+| light_max | INT |
 | created_at | TIMESTAMP |
 | updated_at | TIMESTAMP |
 
@@ -179,13 +192,21 @@ CREATE TABLE environment_setting (
 
     cultivation_id BIGINT NOT NULL UNIQUE,
 
-    target_temperature DECIMAL(4,1) NOT NULL,
+    temp_min DECIMAL(4,1) NOT NULL,
 
-    target_humidity DECIMAL(4,1) NOT NULL,
+    temp_max DECIMAL(4,1) NOT NULL,
 
-    target_co2 INT NOT NULL,
+    humidity_min DECIMAL(4,1) NOT NULL,
 
-    target_light INT NOT NULL,
+    humidity_max DECIMAL(4,1) NOT NULL,
+
+    co2_min INT NOT NULL,
+
+    co2_max INT NOT NULL,
+
+    light_min INT NOT NULL,
+
+    light_max INT NOT NULL,
 
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -350,7 +371,7 @@ CO₂
 
 조도
 
-를 수정합니다.
+를 수정합니다. (API 요청/응답은 단일 목표값 그대로 사용)
 
 ↓
 
@@ -358,7 +379,23 @@ CO₂
 
 ↓
 
-environment_setting 생성
+Cultivation Service가 단일 목표값을 허용 오차만큼 확장하여 범위로 변환
+
+↓
+
+environment_setting 생성 (temp_min/max, humidity_min/max, co2_min/max, light_min/max)
+
+### 단일값 → 범위 변환 기준 (기본값)
+
+| 항목 | 허용 오차 | 예시 (목표값 → 저장 범위) |
+|------|-----------|---------------------------|
+| Temperature | ±1.5℃ | 22℃ → temp_min 20.5 / temp_max 23.5 |
+| Humidity | ±5% | 90% → humidity_min 85 / humidity_max 95 |
+| CO₂ | ±50ppm | 800ppm → co2_min 750 / co2_max 850 |
+| Light | ±30lux | 350lux → light_min 320 / light_max 380 |
+
+허용 오차 값은 재배 환경 저장 API 요청/응답에는 노출되지 않으며, Cultivation Service 내부 저장 로직에만 적용됩니다.
+값은 향후 버섯 종류별로 다르게 조정될 수 있습니다.
 
 ---
 
@@ -408,6 +445,8 @@ Photo (RUNNING 기간 중 언제든 업로드 가능)
 
 - AI 추천 환경은 Database에 저장하지 않습니다.
 - 사용자가 저장한 환경만 저장합니다.
+- environment_setting은 단일 목표값이 아닌 범위(min~max)로 저장합니다. Rule Engine Service가 범위를 벗어날 때만 장치를 제어하도록 하여 불필요한 On/Off를 줄이기 위함입니다.
+- 단일값 → 범위 변환은 Cultivation Service 내부 로직이며, API 요청/응답 스펙에는 영향을 주지 않습니다.
 - Environment Setting은 Cultivation당 하나만 존재합니다.
 - Harvest는 재배 종료 후에만 생성됩니다.
 - Sensor 데이터는 InfluxDB에서 관리하며 PostgreSQL에는 저장하지 않습니다.

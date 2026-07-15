@@ -2,13 +2,19 @@
 
 ## 개요
 
-센서에서 수집한 환경 데이터를 기반으로 Rule Engine Service가 목표 환경과 비교하여
+센서에서 수집한 환경 데이터를 기반으로 Rule Engine Service가 목표 환경 범위와 비교하여
 자동 제어 여부를 판단합니다.
 
-Rule Engine Service는 MQTT 수신, 규칙 평가, Redis/InfluxDB 저장까지 하나의 서비스에서 처리합니다.
-(기존에는 Rule Engine이 RabbitMQ를 거쳐 별도의 Sensor Service에 저장을 위임했으나,
-서비스 통합으로 내부 처리로 단순화되었습니다. RabbitMQ는 이제 Notification Service 등
-진짜 외부 서비스에 알릴 때만 사용합니다.)
+목표 환경은 단일값이 아닌 범위(min~max)로 저장되어 있습니다. 현재값이 범위 안에 있으면 제어하지
+않고, 범위를 벗어난 경우에만 장치를 제어합니다. 불필요하게 장치를 자주 켜고 끄는 것(채터링)을
+막기 위한 히스테리시스 목적입니다.
+
+Rule Engine Service는 MQTT 수신, 검증, 규칙 평가, 자동 제어까지 담당하고, 저장은 직접 하지 않습니다.
+검증을 마친 데이터를 RabbitMQ(EnvironmentMeasuredEvent)로 발행하면 Sensor Service가 구독하여
+Redis/InfluxDB에 저장합니다.
+
+> ℹ️ **변경 이력**: 한때 Rule Engine과 저장(Sensor Service)을 하나의 서비스로 통합해 내부 로직으로
+> 즉시 저장하는 방식을 검토했었지만, 책임 분리를 위해 다시 별도 서비스로 나누고 RabbitMQ로 연결했습니다.
 
 제어가 필요한 경우 제어 명령을 생성하고, 사용자에게 알림을 전송합니다.
 
@@ -31,18 +37,16 @@ MQTT Broker
 
 Rule Engine Service
 
-├── 환경 비교
-├── 제어 여부 판단
-├── Redis 저장 (내부)
-└── InfluxDB 저장 (내부)
+├── 목표 환경 범위 조회 (Cultivation Service, OpenFeign)
+├── 범위 비교 (min/max)
+└── 제어 여부 판단
 
 ↓
 
 RabbitMQ
 
-↓
-
-Notification Service
+├── EnvironmentMeasuredEvent → Sensor Service (Redis/InfluxDB 저장)
+└── EnvironmentControlEvent (제어 발생 시만) → Notification Service
 
 ↓
 
@@ -99,39 +103,42 @@ MQTT를 Subscribe합니다.
 
 ↓
 
-환경 데이터를 수신합니다.
+환경 데이터를 수신하고 검증합니다.
 
 ---
 
-## 4. 목표 환경 조회
+## 4. 목표 환경 범위 조회
 
 Rule Engine Service는
 
-현재 재배의 목표 환경을 조회합니다.
+OpenFeign으로 Cultivation Service를 호출하여 현재 재배의 목표 환경 범위(environment_setting의 min~max)를 조회합니다.
 
 예시
 
 ```
 Temperature
 
-22℃
+temp_min 20.5℃ ~ temp_max 23.5℃
 ```
 
 ```
 Humidity
 
-90%
+humidity_min 85% ~ humidity_max 95%
 ```
+
+이 범위는 Cultivation Service가 사용자의 단일 목표값(예: 온도 22℃)에 허용 오차를 적용해
+저장해 둔 값입니다.
 
 ---
 
-## 5. 환경 비교
+## 5. 범위 비교
 
 현재값
 
 ↓
 
-목표값
+min ~ max 범위
 
 ↓
 
@@ -148,17 +155,17 @@ Humidity
 ↓
 
 ```
-목표
+범위
 
-90%
+85% ~ 95%
 ```
 
 ↓
 
-차이
+판정
 
 ```
-8%
+82% < min(85%) → 범위 미달
 ```
 
 ---
@@ -174,7 +181,7 @@ Rule Engine Service
 예시
 
 ```
-Humidity < Target
+Humidity < humidity_min
 
 ↓
 
@@ -184,38 +191,38 @@ Humidifier ON
 또는
 
 ```
-Temperature > Target
+Temperature > temp_max
 
 ↓
 
 Cooling Fan ON
 ```
 
----
-
-## 7. Redis / InfluxDB 저장 (내부 처리)
-
-같은 서비스 내부에서 즉시 저장합니다.
-
-Redis
-
-```
-현재 환경
-```
-
-InfluxDB
-
-```
-환경 이력
-```
+현재값이 min ~ max 범위 안에 있으면 아무 것도 제어하지 않습니다. (이미 켜져 있던 장치는 OFF)
 
 ---
 
-## 8. RabbitMQ Publish
+## 7. RabbitMQ Publish
 
-Rule Engine Service는
+Rule Engine Service는 두 종류의 이벤트를 발행합니다.
 
-EnvironmentControlEvent를 발행합니다. (Notification Service 전달용)
+### EnvironmentMeasuredEvent (저장용, 매번 발행)
+
+```json
+{
+    "cultivationId":3,
+    "sensorId":1,
+    "temperature":20.5,
+    "humidity":82,
+    "co2":980,
+    "light":310,
+    "measuredAt":"2026-08-15T12:30:00"
+}
+```
+
+구독: Sensor Service
+
+### EnvironmentControlEvent (제어 발생 시만 발행)
 
 ```json
 {
@@ -224,15 +231,34 @@ EnvironmentControlEvent를 발행합니다. (Notification Service 전달용)
     "humidity":82,
     "co2":980,
     "light":310,
-    "action":"HUMIDIFIER_ON"
+    "action":"HUMIDIFIER_ON",
+    "reason":"Humidity below humidity_min"
 }
 ```
+
+구독: Notification Service
+
+범위 안에서 정상 상태로 유지되는 경우 EnvironmentControlEvent는 발행하지 않습니다.
+
+---
+
+## 8. Sensor Service 저장
+
+RabbitMQ Subscribe (EnvironmentMeasuredEvent)
+
+↓
+
+Redis 저장 (최신값)
+
+↓
+
+InfluxDB 저장 (이력)
 
 ---
 
 ## 9. Notification Service
 
-이벤트를 구독합니다.
+RabbitMQ Subscribe (EnvironmentControlEvent)
 
 ↓
 
@@ -243,7 +269,7 @@ EnvironmentControlEvent를 발행합니다. (Notification Service 전달용)
 ```
 🍄 자동 제어
 
-습도가 낮아
+습도가 목표 범위(85~95%) 아래로 떨어져
 
 가습기를 실행했습니다.
 ```
@@ -254,13 +280,13 @@ EnvironmentControlEvent를 발행합니다. (Notification Service 전달용)
 
 ## Redis
 
-현재 환경 저장 (Rule Engine Service 내부)
+현재 환경 저장 (Sensor Service)
 
 ---
 
 ## InfluxDB
 
-환경 이력 저장 (Rule Engine Service 내부)
+환경 이력 저장 (Sensor Service)
 
 ---
 
@@ -276,23 +302,29 @@ sensor/{cultivationId}
 
 # RabbitMQ
 
-Publish (다른 서비스로 전달할 때만 사용)
+Publish
 
 ```
+EnvironmentMeasuredEvent
 EnvironmentControlEvent
 ```
 
 Subscribe
 
-- Notification Service
+- Sensor Service (EnvironmentMeasuredEvent)
+- Notification Service (EnvironmentControlEvent)
 
 ---
 
 # OpenFeign
 
-사용하지 않습니다.
+```
+Rule Engine Service
 
-환경 제어는 MQTT 수신과 내부 처리, RabbitMQ 알림 전달로 구성됩니다.
+↓
+
+Cultivation Service (목표 환경 범위 조회)
+```
 
 ---
 
@@ -300,12 +332,13 @@ Subscribe
 
 | 조건 | 제어 |
 |------|------|
-| Temperature ↑ | 냉각팬 ON |
-| Temperature ↓ | 히터 ON |
-| Humidity ↓ | 가습기 ON |
-| Humidity ↑ | 제습기 ON |
-| CO₂ ↑ | 환풍기 ON |
-| Light ↓ | LED ON |
+| Temperature > temp_max | 냉각팬 ON |
+| Temperature < temp_min | 히터 ON |
+| Humidity < humidity_min | 가습기 ON |
+| Humidity > humidity_max | 제습기 ON |
+| CO₂ > co2_max | 환풍기 ON |
+| Light < light_min | LED ON |
+| 모든 항목이 범위 안 | 제어 없음 |
 
 ---
 
@@ -313,16 +346,16 @@ Subscribe
 
 - MQTT 연결 실패
 - 규칙 평가 오류
-- Redis 저장 실패
-- InfluxDB 저장 실패
+- 목표 환경 범위 조회 실패 (Cultivation Service 호출 실패)
 - RabbitMQ 발행 실패
+- Sensor Service 저장 실패
 - Notification 전송 실패
 
 ---
 
 # 고려 사항
 
-- Rule Engine Service는 현재 환경과 목표 환경 비교, 저장까지 하나의 서비스에서 처리하여 지연을 줄입니다.
-- RabbitMQ는 Notification Service처럼 실제로 분리된 서비스에 알릴 때만 사용합니다.
-- 최신 데이터는 Redis에, 모든 이력은 InfluxDB에 저장합니다.
-- Notification Service는 이벤트만 수신하며 제어에는 관여하지 않습니다.
+- 목표 환경은 단일값이 아닌 범위(min~max)로 저장되어 있어, 범위 안에서는 장치를 켜고 끄지 않습니다.
+- Rule Engine Service는 저장을 직접 하지 않고 RabbitMQ로 Sensor Service에 위임합니다.
+- Rule Engine Service와 Sensor Service는 RabbitMQ로만 연결되며 서로 직접 호출하지 않습니다.
+- Notification Service는 EnvironmentControlEvent만 구독하며, 저장용 EnvironmentMeasuredEvent는 구독하지 않습니다.

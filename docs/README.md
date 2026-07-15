@@ -32,7 +32,7 @@ IoT 센서와 AI(LLM + Vision)를 활용한 개인 맞춤형 버섯 재배 자�
 
 # 🧩 서비스별 문서 매트릭스
 
-API Gateway를 포함해 8개 서비스로 구성됩니다. (기존 9개 서비스에서 Auth+User, Collector+RuleEngine+Storage를 각각 통합)
+API Gateway를 포함해 9개 서비스로 구성됩니다. (기존 9개 서비스에서 Auth+User는 통합, Collector+RuleEngine+Sensor/Storage는 한때 통합했다가 다시 분리)
 
 | 서비스 | 역할 요약 | Domain | API | Database | 관련 Sequence |
 |--------|-----------|--------|-----|----------|----------------|
@@ -41,7 +41,8 @@ API Gateway를 포함해 8개 서비스로 구성됩니다. (기존 9개 서비�
 | Cultivation | 재배 생성/관리/수확/사진 업로드 | [cultivation.md](./01_Domain/cultivation.md) | [cultivation-api.md](./02_API/cultivation-api.md) | [cultivation-db.md](./03_Database/cultivation-db.md) | [create-cultivation](./04_sequence/create-cultivation.md), [harvest](./04_sequence/harvest.md), [growth-analysis](./04_sequence/growth-analysis.md) |
 | AI | 환경 추천, 생육 분석(Vision), 챗봇, 리포트 | [ai.md](./01_Domain/ai.md) | [ai-api.md](./02_API/ai-api.md) | Redis(캐시), MinIO(읽기 전용) | [growth-analysis](./04_sequence/growth-analysis.md), [harvest](./04_sequence/harvest.md), [ai-chat](./04_sequence/ai-chat.md), [ai-report](./04_sequence/ai-report.md) |
 | Embedding | 재배 참조 데이터 임베딩·벡터 검색 | [embedding.md](./01_Domain/embedding.md) | [embedding-api.md](./02_API/embedding-api.md) | [elasticSearch.md](./03_Database/elasticSearch.md) | [create-cultivation](./04_sequence/create-cultivation.md) |
-| Rule Engine | MQTT 수신, 규칙 평가/자동 제어, 측정값 저장·조회·통계 (기존 Collector+RuleEngine+Sensor/Storage 통합) | [rule-Engine.md](./01_Domain/rule-Engine.md) | [rule-engine-api.md](./02_API/rule-engine-api.md) | [influxdb.md](./03_Database/influxdb.md), [redis.md](./03_Database/redis.md) | [sensor-data](./04_sequence/sensor-data.md), [environment-control](./04_sequence/environment-control.md), [sensor-error](./04_sequence/sensor-error.md) |
+| Rule Engine | MQTT 수신(Collector), 검증, 규칙 평가/자동 제어, 센서 오류 감지 | [rule-Engine.md](./01_Domain/rule-Engine.md) | API 없음 (MQTT/RabbitMQ 기반, [rule-engine-api.md](./02_API/rule-engine-api.md) 참고) | 없음 (Cultivation Service를 매번 OpenFeign 조회) | [sensor-data](./04_sequence/sensor-data.md), [environment-control](./04_sequence/environment-control.md), [sensor-error](./04_sequence/sensor-error.md) |
+| Sensor | 측정값 저장(Redis/InfluxDB)·조회·통계·주간월간 리포트 집계 | [sensor.md](./01_Domain/sensor.md) | [sensor-api.md](./02_API/sensor-api.md) | [influxdb.md](./03_Database/influxdb.md), [redis.md](./03_Database/redis.md) | [sensor-data](./04_sequence/sensor-data.md), [environment-control](./04_sequence/environment-control.md) |
 | Notification | WebSocket/Telegram/Discord 알림 | [notification.md](./01_Domain/notification.md) | API 없음 (RabbitMQ 기반) | 없음 | [environment-control](./04_sequence/environment-control.md), [harvest](./04_sequence/harvest.md), [sensor-error](./04_sequence/sensor-error.md) |
 | DatasourceGenerator | IoT 장치/센서 메타데이터 관리, 시뮬레이션 데이터 발행 (기존 Datasource Service 리네임) | [datasource-generator.md](./01_Domain/datasource-generator.md) | [datasource-generator-api.md](./02_API/datasource-generator-api.md) | [datasource-generator-db.md](./03_Database/datasource-generator-db.md) | [sensor-data](./04_sequence/sensor-data.md), [sensor-error](./04_sequence/sensor-error.md) |
 
@@ -53,14 +54,15 @@ DB 전체 그림은 [database-overview.md](./03_Database/database-overview.md)�
 
 문서가 여러 차례 업데이트되며 초기 설계와 달라진 부분입니다. 오래된 자료나 기억에 의존하지 말고 아래 최신 결정을 기준으로 작업해주세요.
 
-### 1. 서비스를 8개(Gateway 포함)로 통합했다
-강사 피드백에 따라 "MSA를 흉내내지 않아도 된다, 합칠 수 있는 건 합쳐라"는 원칙으로 기존 9개 서비스 구조를 재검토했습니다.
+### 1. 서비스 통합/분리를 여러 차례 재검토했다
+강사 피드백("MSA를 흉내내지 않아도 된다, 합칠 수 있는 건 합쳐라")에 따라 서비스 구조를 재검토했고,
+그 과정에서 통합했다가 다시 분리한 부분도 있습니다.
 
-- **Auth + User → Auth Service** — 인증과 회원 프로필은 항상 같이 조회/변경되는 경우가 많아 하나의 서비스, 하나의 `users` 테이블로 통합했습니다.
-- **Collector + Rule Engine + Sensor(Storage) → Rule Engine Service** — MQTT 수신, 규칙 평가, 측정값 저장/조회를 하나의 서비스가 처리합니다. 서비스 간 RabbitMQ 홉이 사라지고 내부 호출로 단순화되었습니다.
-- **Datasource Service → DatasourceGenerator** — 역할은 동일하지만(장치/센서 메타데이터 관리, 시뮬레이션 데이터 발행), 실제 물리 센서가 아닌 시뮬레이션 데이터 생성기라는 점을 이름에 명시했습니다.
+- **Auth + User → Auth Service (통합 유지)** — 인증과 회원 프로필은 항상 같이 조회/변경되는 경우가 많아 하나의 서비스, 하나의 `users` 테이블로 통합했습니다.
+- **Collector + Rule Engine + Sensor(Storage) → 한때 Rule Engine Service로 통합했다가 다시 Rule Engine Service / Sensor Service로 분리** — MQTT 수신·규칙평가·자동제어와 측정값 저장·조회는 책임 크기와 변경 주기가 달라 분리를 유지하기로 했습니다. 대신 Collector는 Rule Engine Service에 남기고(수신·검증), 저장·조회 API는 Sensor Service로 분리했습니다. 두 서비스는 RabbitMQ(EnvironmentMeasuredEvent)로만 연결되며 서로 직접 호출하지 않습니다.
+- **Datasource Service → DatasourceGenerator (리네임 유지)** — 역할은 동일하지만(장치/센서 메타데이터 관리, 시뮬레이션 데이터 발행), 실제 물리 센서가 아닌 시뮬레이션 데이터 생성기라는 점을 이름에 명시했습니다.
 
-최종 구성: API Gateway, Auth, Cultivation, AI, Embedding, Rule Engine, Notification, DatasourceGenerator (총 8개)
+최종 구성: API Gateway, Auth, Cultivation, AI, Embedding, Rule Engine, Sensor, Notification, DatasourceGenerator (총 9개)
 
 ### 2. DB는 엔진별로 통합하고 스키마/네임스페이스로만 분리
 서비스마다 별도 DB 인스턴스를 새로 만들지 않고, PostgreSQL(관계형) / InfluxDB(시계열) / Redis(캐시) / Elasticsearch(벡터) / MinIO(이미지) 5개 저장소를 서비스별로 나눠 쓰는 구조입니다.
@@ -80,11 +82,19 @@ DB 전체 그림은 [database-overview.md](./03_Database/database-overview.md)�
 ### 5. 회원 탈퇴는 Soft Delete + 이벤트 기반 후속 처리
 Auth Service가 Soft Delete와 Refresh Token 삭제를 같은 트랜잭션에서 내부 처리한 뒤 `UserDeletedEvent`를 발행하면, Cultivation Service가 이를 구독해 재배 데이터를 비활성화합니다. (기존에는 Auth Service도 이 이벤트를 구독했으나, Refresh Token 삭제가 내부 로직이 되며 더 이상 구독하지 않습니다.)
 
+### 6. environment_setting은 단일 목표값이 아닌 범위(min~max)로 저장
+Rule Engine Service의 자동 제어가 값이 범위를 벗어날 때만 장치를 동작시키도록 하여, 범위 안에서 불필요하게 켜고 끄는 것(채터링)을 막기 위함입니다.
+
+- API(재배 생성 AI 추천, 환경 설정 저장 `PATCH /cultivations/{id}/environment`)는 그대로 단일 목표값을 주고받습니다.
+- Cultivation Service가 저장 시점에 단일 목표값에 허용 오차를 적용해 범위로 변환합니다. (예: 온도 22℃ ± 1.5℃ → temp_min 20.5 / temp_max 23.5)
+- 컬럼명은 `temp_min`/`temp_max`, `humidity_min`/`humidity_max`, `co2_min`/`co2_max`, `light_min`/`light_max`입니다.
+- Rule Engine Service는 현재 센서값이 이 범위를 벗어날 때만 장치를 제어합니다. (자세한 내용은 [cultivation-db.md](./03_Database/cultivation-db.md), [rule-Engine.md](./01_Domain/rule-Engine.md) 참고)
+
 ---
 
 # ⚠️ 열려있는 이슈 (팀 확인 필요)
 
-- **`/api/v1/sensors` 경로 충돌** — DatasourceGenerator(장치 등록)와 Rule Engine Service(측정값 조회)가 같은 경로 프리픽스를 쓰고 있습니다. 서비스를 통합해도 이 두 서비스는 여전히 분리되어 있어 충돌이 남아 있습니다. 자세한 내용과 대안은 [datasource-generator-api.md](./02_API/datasource-generator-api.md)의 상단 안내를 참고해 팀 논의 후 확정해주세요.
+- **`/api/v1/sensors` 경로 충돌** — DatasourceGenerator(장치 등록)와 Sensor Service(측정값 조회)가 같은 경로 프리픽스를 쓰고 있습니다. 자세한 내용과 대안은 [datasource-generator-api.md](./02_API/datasource-generator-api.md)의 상단 안내를 참고해 팀 논의 후 확정해주세요.
 
 ---
 

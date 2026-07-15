@@ -5,7 +5,7 @@
 AI 리포트는 재배 기간 동안 수집된 환경 데이터를 분석하여
 사용자에게 주간 또는 월간 재배 리포트를 제공합니다.
 
-Rule Engine Service는 InfluxDB에서 통계 데이터를 조회하여
+Sensor Service는 InfluxDB에서 통계 데이터를 조회하여
 AI Service에 전달하고,
 AI Service는 LLM을 이용하여 자연어 리포트를 생성합니다.
 
@@ -26,7 +26,7 @@ AI Service
 
 ↓
 
-Rule Engine Service
+Sensor Service
 
 ↓
 
@@ -104,7 +104,7 @@ Redis에 없으면
 
 ↓
 
-Rule Engine Service 호출
+Sensor Service 호출
 
 (OpenFeign)
 
@@ -112,7 +112,7 @@ Rule Engine Service 호출
 
 ## 4. 환경 데이터 조회
 
-Rule Engine Service
+Sensor Service
 
 ↓
 
@@ -143,7 +143,7 @@ InfluxDB
 
 ## 5. 통계 반환
 
-Rule Engine Service
+Sensor Service
 
 ↓
 
@@ -245,7 +245,7 @@ AI Service
 
 ↓
 
-Rule Engine Service
+Sensor Service
 ```
 
 ---
@@ -284,13 +284,13 @@ TTL
 - Redis 장애
 - InfluxDB 조회 실패
 - LLM 응답 실패
-- Rule Engine Service 호출 실패
+- Sensor Service 호출 실패
 
 ---
 
 # 고려 사항
 
 - 동일 기간의 리포트는 Redis에서 조회합니다.
-- 환경 통계는 Rule Engine Service에서만 계산합니다.
+- 환경 통계는 Sensor Service에서만 계산합니다.
 - AI Service는 자연어 리포트 생성만 담당합니다.
 - InfluxDB 원본 데이터는 직접 LLM에 전달하지 않고, 집계 데이터를 전달하여 토큰 사용량을 줄입니다.

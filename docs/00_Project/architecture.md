@@ -2,17 +2,23 @@
 
 ## 서비스 구성
 
-8개 서비스(API Gateway 포함)로 구성합니다. 강사 피드백("합칠 수 있는 건 합쳐라")에 따라
-기존 9개 서비스에서 Auth+User, Collector+RuleEngine+Storage를 각각 하나로 통합했습니다.
+9개 서비스(API Gateway 포함)로 구성합니다. 강사 피드백("합칠 수 있는 건 합쳐라")에 따라
+Auth+User는 하나로 통합했습니다. Collector+RuleEngine+Sensor(Storage)는 한때 통합을 검토했지만,
+저장·조회 책임의 크기와 변경 주기가 규칙 평가/제어 로직과 달라 Rule Engine Service(수신·평가·제어)와
+Sensor Service(저장·조회)로 다시 분리했습니다.
 
 - API Gateway
 - Auth Service (기존 Auth+User 통합)
 - Cultivation Service
 - AI Service
 - Embedding Service
-- Rule Engine Service (기존 Collector+RuleEngine+Sensor/Storage 통합)
+- Rule Engine Service (MQTT 수신/Collector, 검증, 규칙 평가, 자동 제어, 센서 오류 감지)
+- Sensor Service (측정값 저장/조회, 통계·차트, 주간/월간 리포트 집계)
 - Notification Service
 - DatasourceGenerator (기존 Datasource Service 리네임)
+
+Rule Engine Service와 Sensor Service는 RabbitMQ(EnvironmentMeasuredEvent)로만 연결되며
+서로 직접 호출하지 않습니다.
 
 ---
 

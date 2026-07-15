@@ -62,14 +62,16 @@
 
 ### 개발 대상
 
-8개 서비스(API Gateway 포함)로 구성합니다. Auth+User, Collector+RuleEngine+Storage는 각각 하나의 서비스로 통합 개발합니다.
+9개 서비스(API Gateway 포함)로 구성합니다. Auth+User는 하나의 서비스로 통합 개발하고,
+Rule Engine과 Sensor는 책임을 분리해 별도 서비스로 개발합니다.
 
 - API Gateway
 - Auth Service (기존 Auth+User 통합)
 - Cultivation Service
 - AI Service
 - Embedding Service
-- Rule Engine Service (기존 Collector+RuleEngine+Sensor/Storage 통합)
+- Rule Engine Service (MQTT 수신/Collector, 검증, 규칙 평가, 자동 제어, 센서 오류 감지)
+- Sensor Service (측정값 저장/조회, 통계·차트, 주간/월간 리포트 집계)
 - Notification Service
 - DatasourceGenerator (기존 Datasource Service 리네임)
 

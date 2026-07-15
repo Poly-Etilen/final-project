@@ -254,5 +254,5 @@ MQTT → Rule Engine Service
 - 실제 센서 데이터는 PostgreSQL에 저장하지 않습니다.
 - 센서의 메타데이터만 저장합니다.
 - 센서값은 MQTT를 통해 Rule Engine Service로 전달됩니다.
-- 시계열 데이터는 Rule Engine Service(InfluxDB)에서 관리합니다.
+- 시계열 데이터는 Sensor Service(InfluxDB)에서 관리합니다. Rule Engine Service는 수신·검증·규칙평가만 담당하고 RabbitMQ로 Sensor Service에 저장을 위임합니다.
 - 하나의 Datasource에는 여러 개의 Sensor가 연결될 수 있습니다.

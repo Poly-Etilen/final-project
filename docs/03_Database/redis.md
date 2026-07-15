@@ -16,7 +16,7 @@ Redis는 실시간 데이터와 임시 데이터를 저장하기 위해 사용�
 | Auth Service | Refresh Token |
 | Auth Service | 이메일 인증 |
 | AI Service | AI 응답 캐시 |
-| Rule Engine Service | 최신 센서 데이터 |
+| Sensor Service | 최신 센서 데이터 |
 
 ---
 
@@ -177,9 +177,7 @@ TTL
 
 ---
 
-## Rule Engine Service
-
-(기존 Sensor Service 역할 포함)
+## Sensor Service
 
 저장 데이터
 
@@ -263,7 +261,15 @@ MQTT 수신
 
 ↓
 
-Rule Engine Service (규칙평가 + 저장을 함께 처리)
+Rule Engine Service (검증 + 규칙평가)
+
+↓
+
+RabbitMQ (EnvironmentMeasuredEvent)
+
+↓
+
+Sensor Service
 
 ↓
 

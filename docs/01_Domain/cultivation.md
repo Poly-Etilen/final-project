@@ -42,6 +42,10 @@ Cultivation Service는 사용자의 버섯 재배 정보를 관리하는 핵심 
 사용자가 추천 환경을 수정한 후 저장하면
 최종 환경 설정이 Database에 저장됩니다.
 
+API로 주고받는 목표값은 단일값(예: 온도 22℃)이지만, Database에는 허용 오차를 적용한
+범위(예: 20.5~23.5℃)로 저장됩니다. Rule Engine Service가 값이 범위를 벗어날 때만
+장치를 제어하도록 하여 불필요한 On/Off를 줄이기 위함입니다. (자세한 변환 기준은 cultivation-db.md 참고)
+
 ---
 
 ## 재배 목록 조회
@@ -261,7 +265,7 @@ AI 리포트 조회
 
 ---
 
-### Rule Engine Service
+### Sensor Service
 
 현재 센서 상태 조회
 
@@ -274,6 +278,10 @@ AI 리포트 조회
 ## 호출받는 서비스
 
 API Gateway
+
+### Rule Engine Service
+
+규칙 평가 시 목표 환경 범위(environment_setting의 min~max) 조회
 
 ---
 

@@ -7,8 +7,8 @@
 | Database | 용도 | 사용 서비스 |
 |----------|------|------------|
 | PostgreSQL | 관계형 데이터 저장 | Auth, Cultivation, DatasourceGenerator |
-| Redis | 캐시 및 임시 데이터 | Auth, AI, Rule Engine |
-| InfluxDB | 시계열 센서 데이터 | Rule Engine |
+| Redis | 캐시 및 임시 데이터 | Auth, AI, Sensor |
+| InfluxDB | 시계열 센서 데이터 | Sensor |
 | Elasticsearch | Vector Search | Embedding |
 | MinIO | 생육 사진(이미지) 저장 | Cultivation, AI |
 
@@ -88,7 +88,7 @@ ai:{hash}
 
 ---
 
-## Rule Engine
+## Sensor
 
 ### Current Environment
 
@@ -96,7 +96,7 @@ ai:{hash}
 cultivation:{cultivationId}:current
 ```
 
-(기존 Sensor Service가 담당하던 저장소이며, 서비스 통합으로 Rule Engine Service가 관리합니다.)
+Rule Engine Service가 RabbitMQ(EnvironmentMeasuredEvent)로 전달한 데이터를 Sensor Service가 저장합니다.
 
 ---
 
@@ -120,7 +120,7 @@ environment
 - co2
 - light
 
-Rule Engine Service가 저장/조회를 전담합니다. (기존 Sensor Service 역할 포함)
+Sensor Service가 저장/조회를 전담합니다. Rule Engine Service는 RabbitMQ로 데이터를 전달만 합니다.
 
 ---
 
@@ -171,11 +171,15 @@ mushroom-photos
 | Cultivation | O | X | X | X | O |
 | AI | X | O | X | X | O |
 | Embedding | X | X | X | O | X |
-| Rule Engine | X | O | O | X | X |
+| Rule Engine | X | X | X | X | X |
+| Sensor | X | O | O | X | X |
 | Notification | X | X | X | X | X |
 | DatasourceGenerator | O | X | X | X | X |
 
-Auth(구 Auth+User), Rule Engine(구 Collector+RuleEngine+Sensor/Storage)은 서비스 통합으로 컬럼이 하나로 줄었습니다.
+Auth(구 Auth+User)는 서비스 통합으로 테이블이 하나로 줄었습니다.
+Rule Engine Service는 자체 Database가 없으며 MQTT/RabbitMQ로만 동작합니다.
+Sensor Service는 Rule Engine Service가 RabbitMQ로 전달한 데이터를 Redis/InfluxDB에 저장합니다.
+(한때 Rule Engine과 Sensor를 하나로 통합했었지만, 저장·조회 책임의 크기가 달라 다시 분리했습니다.)
 
 ---
 
@@ -189,9 +193,16 @@ MQTT
 
 ↓
 
-Rule Engine Service
+Rule Engine Service (수신·검증·규칙평가 → 자동 제어)
 
-├── 규칙 평가 → 자동 제어
+↓
+
+RabbitMQ (EnvironmentMeasuredEvent)
+
+↓
+
+Sensor Service
+
 ├── Redis 저장 (최신값)
 └── InfluxDB 저장 (이력)
 
@@ -215,5 +226,5 @@ LLM
 
 Client
 
-센서 데이터 수신부터 저장까지는 Rule Engine Service 하나가 전담하며,
-서비스 경계를 넘는 지점(Notification 알림 등)에서만 RabbitMQ를 사용합니다.
+센서 데이터 수신·규칙평가(Rule Engine Service)와 저장·조회(Sensor Service)는 서로 다른 서비스이며,
+RabbitMQ(EnvironmentMeasuredEvent)로만 연결됩니다.

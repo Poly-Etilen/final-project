@@ -5,7 +5,7 @@
 DatasourceGenerator에서 제공하는 REST API 명세입니다. (기존 명칭: Datasource API)
 
 IoT 데이터 소스 및 센서 "장치"를 등록/관리합니다. 센서가 측정한 환경 값 자체의 조회는
-Rule Engine API(`/api/v1/sensors/current` 등)를 참고하세요. 이 문서는 장치 메타데이터 관리용입니다.
+Sensor API(`/api/v1/sensors/current` 등)를 참고하세요. 이 문서는 장치 메타데이터 관리용입니다.
 
 Base URL
 
@@ -25,11 +25,11 @@ Bearer JWT (관리자 권한)
 # ⚠️ 알려진 이슈: /sensors 경로 충돌
 
 DatasourceGenerator(장치 등록: `POST /sensors`, `GET /sensors`, `GET /sensors/{sensorId}`)와
-Rule Engine Service(측정값 조회: `GET /sensors/current`, `GET /sensors/statistics` 등)가
+Sensor Service(측정값 조회: `GET /sensors/current`, `GET /sensors/statistics` 등)가
 동일한 `/api/v1/sensors` 경로 프리픽스를 사용하고 있습니다.
 
-서비스를 통합(Auth+User, Collector+RuleEngine+Storage)하면서 서비스 개수는 줄었지만,
-이 경로 충돌은 두 서비스가 여전히 분리되어 있어 그대로 남아 있습니다.
+두 서비스는 처음부터 별도 서비스였으며(Rule Engine Service는 측정값을 저장/제공하지 않고 MQTT/RabbitMQ로만 동작),
+이 경로 충돌은 계속 남아 있습니다.
 
 API Gateway가 서비스 이름이 아닌 경로만으로 라우팅할 경우 충돌 가능성이 있으므로,
 아래 중 하나로 확정이 필요합니다.

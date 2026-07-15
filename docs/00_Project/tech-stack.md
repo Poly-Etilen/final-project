@@ -3,11 +3,14 @@
 ## Backend
 
 - Java 21
-- Spring Boot
+- Spring Boot 4.0.7 (Spring Framework 7.0.x 기반)
 - Spring MVC
 - Spring Security
 - Spring Data JPA
 - Spring AI
+
+Spring MVC / Spring Security / Spring Data JPA / Spring AI는 별도 버전을 명시하지 않고
+Spring Boot 4.0.7이 관리하는 BOM(Bill of Materials) 버전을 그대로 따릅니다.
 
 ---
 
@@ -66,6 +69,8 @@
 - Spring Cloud Gateway
 - Eureka Server
 - OpenFeign
+
+Spring Cloud 2025.1.x (Oakwood) 릴리스 트레인 사용 — Spring Boot 4.0.x와 호환되는 버전입니다.
 
 ---
 

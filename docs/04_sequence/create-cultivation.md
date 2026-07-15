@@ -244,11 +244,28 @@ Client
 
 저장 버튼을 누르면
 
+Cultivation Service
+
+↓
+
+단일 목표값을 허용 오차만큼 확장하여 범위(min~max)로 변환
+
+↓
+
 Environment Setting이 생성됩니다.
 
 ```text
 environment_setting
 ```
+
+예시 (허용 오차 적용)
+
+```
+Temperature 22℃ → temp_min 20.5 / temp_max 23.5
+Humidity 91% → humidity_min 86 / humidity_max 96
+```
+
+API 요청/응답에는 단일 목표값만 노출되며, 범위 변환은 Cultivation Service 내부 저장 로직입니다.
 
 ---
 
@@ -356,5 +373,6 @@ FINISHED
 
 - AI 추천 환경은 Database에 저장하지 않습니다.
 - 사용자가 최종 저장한 환경만 저장합니다.
+- 저장 시 단일 목표값은 허용 오차만큼 확장된 범위(min~max)로 변환되어 저장됩니다. API 스펙은 단일값을 그대로 유지합니다.
 - 재배는 환경 저장 이후 RUNNING 상태가 됩니다.
 - Embedding 검색 실패 시 기본 프롬프트를 사용하여 AI 추천을 수행합니다.
