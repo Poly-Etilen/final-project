@@ -150,8 +150,11 @@ FK  cultivation_id
 단일 목표값이 아닌 범위로 저장하는 이유는 Rule Engine Service의 자동 제어가
 값이 범위를 벗어날 때만 장치를 동작시키고, 범위 안에서는 불필요하게 켜고 끄지 않도록(허용 오차/히스테리시스) 하기 위함입니다.
 
-AI 추천값 자체는 저장하지 않습니다. (API/AI 추천 응답은 여전히 단일 목표값을 사용하며,
-Cultivation Service가 저장 시점에 단일값을 범위로 변환합니다. 아래 "단일값 → 범위 변환" 참고)
+mushroom_reference 조회 결과(추천값, 범위 형태)는 그대로 저장하지 않습니다. 사용자가 이 추천값을
+참고해서 **단일 목표값**으로 환경 저장 API(`PATCH /environment`)를 호출하면, 그 시점에
+Cultivation Service가 단일값을 범위로 변환해 저장합니다. 아래 "단일값 → 범위 변환" 참고.
+조회 응답에서 다시 단일값이 필요하면 저장된 범위의 중간값을 계산합니다. (아래 "범위 → 단일값
+역변환" 참고)
 
 | Column | Type |
 |---------|------|
@@ -490,6 +493,22 @@ environment_setting 생성 (temp_min/max, humidity_min/max, co2_min/max, light_m
 허용 오차 값은 재배 환경 저장 API 요청/응답에는 노출되지 않으며, Cultivation Service 내부 저장 로직에만 적용됩니다.
 값은 향후 버섯 종류별로 다르게 조정될 수 있습니다.
 
+### 범위 → 단일값 역변환 (조회 시)
+
+environment_setting에는 min/max만 저장되며, 사용자가 입력했던 단일 목표값은 별도 컬럼으로 저장하지
+않습니다. `GET /cultivations/{id}` 등 조회 API가 단일값을 응답해야 할 때는 저장된 범위의
+**중간값**을 계산해서 사용합니다.
+
+```
+단일값 = (min + max) / 2
+```
+
+허용 오차가 항상 대칭(±고정값)으로 적용되므로, 이 중간값은 사용자가 원래 입력했던 단일 목표값과
+정확히 일치합니다. 예시: temp_min 20.5 / temp_max 23.5 → (20.5+23.5)/2 = 22.0℃ (원본 입력값과 동일)
+
+이 계산은 Cultivation Service가 조회 시점에 매번 수행하며, 별도로 캐싱하거나 추가 컬럼에
+저장하지 않습니다.
+
 ---
 
 ## ③ 재배 종료
@@ -542,6 +561,7 @@ Photo (RUNNING 기간 중 언제든 업로드 가능)
 - mushroom_reference는 cultivation_id가 없는 전역 테이블이며, 버섯 종류가 5종으로 고정되어 있어 관리자가 값을 갱신하기 전까지 정적으로 유지됩니다.
 - environment_setting은 단일 목표값이 아닌 범위(min~max)로 저장합니다. Rule Engine Service가 범위를 벗어날 때만 장치를 제어하도록 하여 불필요한 On/Off를 줄이기 위함입니다.
 - 단일값 → 범위 변환은 Cultivation Service 내부 로직이며, API 요청/응답 스펙에는 영향을 주지 않습니다.
+- 반대로 조회 시 단일값이 필요하면 저장된 범위의 중간값 `(min+max)/2`를 계산합니다. 허용 오차가 대칭이므로 이 값은 사용자가 원래 입력했던 단일값과 정확히 일치하며, 별도 컬럼에 원본값을 중복 저장하지 않습니다.
 - Environment Setting은 Cultivation당 하나만 존재합니다.
 - Harvest는 재배 종료 후에만 생성됩니다.
 - Sensor 데이터는 InfluxDB에서 관리하며 PostgreSQL에는 저장하지 않습니다.

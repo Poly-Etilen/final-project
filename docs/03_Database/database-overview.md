@@ -82,11 +82,35 @@ email:{email}
 
 ## AI
 
-### AI Response Cache
+### AI 챗봇 응답 Cache
 
 ```
 ai:{hash}
 ```
+
+TTL 24시간
+
+---
+
+### AI 생육 분석 결과 Cache
+
+```
+ai:{cultivationId}:analysis
+```
+
+TTL 6시간
+
+---
+
+### AI 리포트 Cache
+
+```
+report:{cultivationId}:{period}
+```
+
+TTL 24시간
+
+자세한 키/값 구조는 [redis.md](./redis.md), [ai-api.md](../02_API/ai-api.md) 참고.
 
 ---
 

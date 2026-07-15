@@ -155,6 +155,11 @@ RabbitMQ로 EnvironmentRangeUpdatedEvent를 발행합니다. (Rule Engine Servic
 }
 ```
 
+`environment`의 각 값은 environment_setting에 저장된 범위의 중간값 `(min+max)/2`을 조회
+시점에 계산한 것입니다. 허용 오차가 대칭으로 적용되므로 저장 시 사용자가 입력했던 단일값과
+정확히 일치합니다. (자세한 내용은 [cultivation-db.md](../03_Database/cultivation-db.md)의
+"범위 → 단일값 역변환" 참고)
+
 ---
 
 # 재배 수정

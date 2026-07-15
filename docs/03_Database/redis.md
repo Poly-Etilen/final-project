@@ -83,7 +83,7 @@ TTL
 
 # AI
 
-## AI Response Cache
+## AI 챗봇 응답 Cache
 
 사용자의 동일한 질문에 대해
 LLM 호출을 줄이기 위해 사용합니다.
@@ -93,6 +93,8 @@ Key
 ```
 ai:{hash}
 ```
+
+hash는 cultivationId와 질문 내용을 조합하여 생성합니다.
 
 Example
 
@@ -106,6 +108,80 @@ Value
 {
   "answer": "...",
   "createdAt": "2026-08-15T10:22:30"
+}
+```
+
+TTL
+
+```
+24시간
+```
+
+---
+
+## AI 생육 분석 결과 Cache
+
+Vision 분석은 비용이 크므로, 동일 재배의 최근 분석 결과를 재사용하기 위해 캐싱합니다.
+(`GET /cultivations/{cultivationId}/analysis`가 새로 분석하지 않고 이 캐시를 반환합니다.)
+
+Key
+
+```
+ai:{cultivationId}:analysis
+```
+
+Example
+
+```
+ai:3:analysis
+```
+
+Value
+
+```json
+{
+  "growthScore": 85,
+  "myceliumGrowthRate": 82,
+  "capSize": "중(3.2cm)",
+  "colorStatus": "정상",
+  "diseaseStatus": "정상",
+  "growthStage": "자실체 형성기",
+  "expectedHarvestDate": "2026-08-20"
+}
+```
+
+TTL
+
+```
+6시간
+```
+
+---
+
+## AI 리포트 Cache
+
+같은 재배/기간에 대한 주간·월간 리포트를 반복 생성하지 않도록 캐싱합니다.
+
+Key
+
+```
+report:{cultivationId}:{period}
+```
+
+Example
+
+```
+report:3:weekly
+```
+
+Value
+
+```json
+{
+  "period": "weekly",
+  "averageTemperature": 22.1,
+  "environmentMaintainRate": 95,
+  "report": "..."
 }
 ```
 
@@ -223,8 +299,9 @@ Redis는 항상 갱신하지만, InfluxDB는 재배별 10초 간격으로 스로
 
 저장 데이터
 
-- AI 응답
-- 프롬프트 캐시
+- AI 챗봇 응답 (ai:{hash}, TTL 24시간)
+- AI 생육 분석 결과 (ai:{cultivationId}:analysis, TTL 6시간)
+- AI 리포트 (report:{cultivationId}:{period}, TTL 24시간)
 
 ---
 
@@ -385,9 +462,11 @@ Redis 저장
 
 TTL을 사용하는 데이터
 
-- Refresh Token
-- 이메일 인증
-- AI Cache
+- Refresh Token (14일)
+- 이메일 인증 (5분)
+- AI 챗봇 응답 캐시 (24시간)
+- AI 생육 분석 결과 캐시 (6시간)
+- AI 리포트 캐시 (24시간)
 - 목표 환경 범위 캐시 (Rule Engine Service, 24시간)
 
 TTL을 사용하지 않는 데이터
