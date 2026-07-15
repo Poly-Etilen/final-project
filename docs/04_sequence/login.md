@@ -82,7 +82,7 @@ Auth Service
 ## 2. 사용자 조회
 
 ```
-auth_user
+users
 ```
 
 조회
@@ -251,7 +251,7 @@ Refresh Token 삭제
 ## PostgreSQL
 
 ```
-auth_user
+users
 ```
 
 ---

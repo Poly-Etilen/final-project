@@ -1,10 +1,13 @@
-# Datasource Service
+# DatasourceGenerator
 
 ## 역할
 
-Datasource Service는 센서 및 데이터 소스를 관리하고, 센서에서 수집된 데이터를 MQTT Broker로 발행(Publish)하는 서비스입니다.
+DatasourceGenerator는 센서 및 데이터 소스를 관리하고, 센서에서 수집된 데이터를 MQTT Broker로 발행(Publish)하는 서비스입니다.
 
-실제 운영 환경에서는 IoT 센서와 연동되며, 개발 환경에서는 센서 데이터를 시뮬레이션하여 생성할 수 있습니다.
+(기존 명칭: Datasource Service)
+
+실제 운영 환경에서는 IoT 센서와 연동되며, 개발 환경에서는 CSV 등을 반복적으로 읽어 센서 데이터를 시뮬레이션 생성합니다.
+서비스 이름의 "Generator"는 이 시뮬레이션 데이터 생성 역할을 강조한 것입니다.
 
 ---
 
@@ -12,7 +15,7 @@ Datasource Service는 센서 및 데이터 소스를 관리하고, 센서에서 
 
 - 데이터 소스 관리
 - 센서 관리
-- 센서 데이터 발행
+- 센서 데이터 발행 (실제 또는 시뮬레이션)
 - MQTT Publish
 - 센서 상태 관리
 
@@ -69,6 +72,9 @@ Datasource Service는 센서 및 데이터 소스를 관리하고, 센서에서 
 - OFFLINE
 - ERROR
 
+Rule Engine Service가 센서 오류/연결 해제를 감지하면 SensorErrorEvent를 발행하며,
+DatasourceGenerator는 이를 구독하여 상태를 갱신합니다.
+
 ---
 
 # API
@@ -105,7 +111,7 @@ GET /sensors/{sensorId}
 
 # Database
 
-Datasource Service는 PostgreSQL을 사용합니다.
+DatasourceGenerator는 PostgreSQL을 사용합니다.
 
 ### Table
 
@@ -136,9 +142,17 @@ Datasource Service는 PostgreSQL을 사용합니다.
 
 # Event
 
-현재 이벤트를 발행하지 않습니다.
+## 구독 이벤트
 
-센서 데이터는 MQTT를 통해 전송합니다.
+### SensorErrorEvent
+
+Rule Engine Service가 발행합니다.
+
+센서 오류/연결 해제가 감지되면 sensor 테이블의 status를 OFFLINE/ERROR로 갱신합니다.
+
+---
+
+발행하는 이벤트는 없습니다. 센서 데이터는 MQTT를 통해서만 전송합니다.
 
 ---
 
@@ -167,11 +181,11 @@ sensor/{sensorId}
 
 # Sequence
 
-센서
+센서 (실제 또는 시뮬레이션)
 
 ↓
 
-Datasource Service
+DatasourceGenerator
 
 ↓
 
@@ -183,7 +197,7 @@ MQTT Broker
 
 ↓
 
-Rule Engine
+Rule Engine Service
 
 ---
 

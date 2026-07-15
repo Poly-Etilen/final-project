@@ -5,8 +5,8 @@
 센서가 정상적으로 데이터를 전송하지 않거나 비정상적인 값을 전송할 경우
 이를 감지하여 사용자에게 알리는 과정입니다.
 
-Rule Engine이 수신 주기와 데이터 유효성을 검사하며,
-이상이 감지되면 Datasource Service의 센서 상태를 갱신하고 Notification Service를 통해 알립니다.
+Rule Engine Service가 수신 주기와 데이터 유효성을 검사하며,
+이상이 감지되면 DatasourceGenerator의 센서 상태를 갱신하고 Notification Service를 통해 알립니다.
 
 ---
 
@@ -21,7 +21,7 @@ MQTT Broker
 
 ↓
 
-Rule Engine
+Rule Engine Service
 
 ↓
 
@@ -43,7 +43,7 @@ RabbitMQ
 
 SensorErrorEvent 발행
 
-├── Datasource Service
+├── DatasourceGenerator
 │     └── sensor.status 갱신
 │
 └── Notification Service
@@ -73,7 +73,7 @@ Discord
 
 ## 2. 수신 주기 검사
 
-Rule Engine은 Scheduler를 통해
+Rule Engine Service는 Scheduler를 통해
 
 센서별 마지막 수신 시각을 주기적으로 확인합니다.
 
@@ -111,7 +111,7 @@ Rule Engine은 Scheduler를 통해
 
 ## 4. 이상 판단
 
-Rule Engine
+Rule Engine Service
 
 ↓
 
@@ -131,7 +131,7 @@ ERROR
 
 ## 5. RabbitMQ Publish
 
-Rule Engine은
+Rule Engine Service는
 
 SensorErrorEvent를 발행합니다.
 
@@ -147,7 +147,7 @@ SensorErrorEvent를 발행합니다.
 
 ---
 
-## 6. Datasource Service 처리
+## 6. DatasourceGenerator 처리
 
 RabbitMQ Subscribe
 
@@ -185,7 +185,7 @@ ONLINE → OFFLINE
 ## PostgreSQL
 
 ```
-sensor (Datasource DB)
+sensor (DatasourceGenerator DB)
 ```
 
 ---
@@ -212,7 +212,7 @@ SensorErrorEvent
 
 Subscribe
 
-- Datasource Service
+- DatasourceGenerator
 - Notification Service
 
 ---
@@ -229,7 +229,7 @@ Subscribe
 
 - MQTT Broker 연결 자체 장애 (전체 센서 감지 불가)
 - RabbitMQ 발행 실패
-- Datasource Service 상태 갱신 실패
+- DatasourceGenerator 상태 갱신 실패
 - Notification 전송 실패
 - 일시적 지연으로 인한 오탐(False Positive)
 
@@ -237,8 +237,8 @@ Subscribe
 
 # 고려 사항
 
-- Rule Engine은 센서별 마지막 수신 시각을 메모리 또는 캐시에 관리합니다.
+- Rule Engine Service는 센서별 마지막 수신 시각을 메모리 또는 캐시에 관리합니다.
 - 수신 주기 기준(60초)은 센서 타입에 따라 다르게 설정할 수 있습니다.
-- 센서 오류 상태는 Datasource DB에서만 관리하며 InfluxDB에는 기록하지 않습니다.
+- 센서 오류 상태는 DatasourceGenerator DB에서만 관리하며 InfluxDB에는 기록하지 않습니다.
 - 센서가 다시 정상 데이터를 전송하면 상태를 ONLINE으로 복구합니다. (SensorRecoveredEvent는 추후 개발 예정)
 - 오탐을 줄이기 위해 일정 횟수 이상 이상값이 반복될 때만 ERROR로 판단하는 방식은 추후 개선 대상입니다.

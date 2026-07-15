@@ -4,12 +4,11 @@
 
 센서에서 생성된 환경 데이터를 실시간으로 수집하고 저장하는 과정입니다.
 
-수신된 데이터는
+Rule Engine Service가 MQTT 수신부터 검증, Redis(현재 상태)/InfluxDB(시계열 데이터) 저장까지
+하나의 서비스에서 처리합니다. (기존에는 Rule Engine이 검증 후 RabbitMQ로 별도의
+Sensor Service에 저장을 위임했으나, 서비스 통합으로 내부 처리로 단순화되었습니다.)
 
-- Redis(현재 상태)
-- InfluxDB(시계열 데이터)
-
-에 각각 저장되며, 대시보드와 AI 분석에 활용됩니다.
+저장된 데이터는 대시보드와 AI 분석에 활용됩니다.
 
 ---
 
@@ -20,7 +19,7 @@ Sensor
 
 ↓
 
-Datasource Service
+DatasourceGenerator
 
 ↓
 
@@ -28,16 +27,9 @@ MQTT Broker
 
 ↓
 
-Rule Engine
+Rule Engine Service
 
-↓
-
-RabbitMQ
-
-↓
-
-Sensor Service
-
+├── 데이터 검증
 ├── Redis 저장
 └── InfluxDB 저장
 
@@ -73,7 +65,7 @@ Dashboard
 
 ---
 
-## 2. Datasource Service
+## 2. DatasourceGenerator
 
 센서 데이터를 수신합니다.
 
@@ -89,35 +81,21 @@ sensor/{cultivationId}
 
 ---
 
-## 3. Rule Engine
+## 3. Rule Engine Service 수신 및 검증
 
 MQTT Topic을 Subscribe합니다.
 
 ↓
 
-데이터 검증
+데이터 검증 (수신 주기, 값 범위)
 
 ↓
 
-EnvironmentMeasuredEvent 생성
-
-↓
-
-RabbitMQ Publish
+같은 서비스 내부에서 즉시 저장 처리
 
 ---
 
-## 4. Sensor Service
-
-RabbitMQ를 Subscribe합니다.
-
-↓
-
-센서 데이터를 저장합니다.
-
----
-
-## 5. Redis 저장
+## 4. Redis 저장
 
 최신 환경 데이터를 저장합니다.
 
@@ -143,7 +121,7 @@ Value
 
 ---
 
-## 6. InfluxDB 저장
+## 5. InfluxDB 저장
 
 Measurement
 
@@ -171,13 +149,13 @@ Timestamp
 
 ---
 
-## 7. Dashboard 조회
+## 6. Dashboard 조회
 
 사용자가 대시보드를 조회합니다.
 
 ↓
 
-Sensor Service
+Rule Engine Service
 
 ↓
 
@@ -189,13 +167,13 @@ Redis 조회
 
 ---
 
-## 8. 차트 조회
+## 7. 차트 조회
 
 사용자가 기간별 차트를 요청합니다.
 
 ↓
 
-Sensor Service
+Rule Engine Service
 
 ↓
 
@@ -223,35 +201,28 @@ InfluxDB 조회
 
 # MQTT
 
-Publish
+Subscribe
 
 ```
 sensor/{cultivationId}
 ```
 
+DatasourceGenerator가 발행한 데이터를 Rule Engine Service가 직접 구독하여 검증과 저장까지 처리합니다.
+
 ---
 
 # RabbitMQ
 
-Publish
+사용하지 않습니다.
 
-```
-EnvironmentMeasuredEvent
-```
-
-Subscribe
-
-```
-Sensor Service
-```
+기존에는 검증 후 EnvironmentMeasuredEvent를 RabbitMQ로 발행해 Sensor Service에 전달했으나,
+서비스 통합으로 별도 이벤트 없이 내부에서 바로 저장합니다.
 
 ---
 
 # OpenFeign
 
 사용하지 않습니다.
-
-센서 데이터 처리는 비동기(Event-Driven) 방식으로 처리합니다.
 
 ---
 
@@ -298,7 +269,6 @@ InfluxDB
 # 예외 상황
 
 - MQTT Broker 연결 실패
-- RabbitMQ 장애
 - Redis 저장 실패
 - InfluxDB 저장 실패
 - Dashboard 조회 실패
@@ -309,5 +279,5 @@ InfluxDB
 
 - Redis에는 항상 최신 데이터만 유지합니다.
 - InfluxDB에는 모든 센서 데이터를 저장합니다.
-- Dashboard는 현재 상태와 이력을 각각 다른 저장소에서 조회합니다.
+- Dashboard는 현재 상태와 이력을 각각 다른 저장소에서 조회하지만, 조회 창구는 Rule Engine Service 하나입니다.
 - AI 분석은 Redis가 아닌 InfluxDB 데이터를 기반으로 수행합니다.

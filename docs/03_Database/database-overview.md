@@ -6,9 +6,9 @@
 
 | Database | 용도 | 사용 서비스 |
 |----------|------|------------|
-| PostgreSQL | 관계형 데이터 저장 | Auth, User, Cultivation, Datasource |
-| Redis | 캐시 및 임시 데이터 | Auth, AI, Sensor |
-| InfluxDB | 시계열 센서 데이터 | Sensor |
+| PostgreSQL | 관계형 데이터 저장 | Auth, Cultivation, DatasourceGenerator |
+| Redis | 캐시 및 임시 데이터 | Auth, AI, Rule Engine |
+| InfluxDB | 시계열 센서 데이터 | Rule Engine |
 | Elasticsearch | Vector Search | Embedding |
 | MinIO | 생육 사진(이미지) 저장 | Cultivation, AI |
 
@@ -20,19 +20,7 @@
 
 ### 목적
 
-사용자 인증 정보를 관리합니다.
-
-### Table
-
-- auth_user
-
----
-
-## User DB
-
-### 목적
-
-사용자 프로필 정보를 관리합니다.
+인증 정보와 회원 프로필 정보를 하나의 `users` 테이블로 관리합니다. (기존 Auth+User 서비스 통합)
 
 ### Table
 
@@ -55,11 +43,11 @@
 
 ---
 
-## Datasource DB
+## DatasourceGenerator DB
 
 ### 목적
 
-센서 및 데이터 소스를 관리합니다.
+센서 및 데이터 소스를 관리합니다. (기존 명칭: Datasource DB)
 
 ### Table
 
@@ -100,13 +88,15 @@ ai:{hash}
 
 ---
 
-## Sensor
+## Rule Engine
 
 ### Current Environment
 
 ```
 cultivation:{cultivationId}:current
 ```
+
+(기존 Sensor Service가 담당하던 저장소이며, 서비스 통합으로 Rule Engine Service가 관리합니다.)
 
 ---
 
@@ -129,6 +119,8 @@ environment
 - humidity
 - co2
 - light
+
+Rule Engine Service가 저장/조회를 전담합니다. (기존 Sensor Service 역할 포함)
 
 ---
 
@@ -176,20 +168,20 @@ mushroom-photos
 | Service | PostgreSQL | Redis | InfluxDB | Elasticsearch | MinIO |
 |----------|------------|--------|-----------|---------------|-------|
 | Auth | O | O | X | X | X |
-| User | O | X | X | X | X |
 | Cultivation | O | X | X | X | O |
 | AI | X | O | X | X | O |
 | Embedding | X | X | X | O | X |
-| Datasource | O | X | X | X | X |
-| Rule Engine | X | X | X | X | X |
-| Sensor | X | O | O | X | X |
+| Rule Engine | X | O | O | X | X |
 | Notification | X | X | X | X | X |
+| DatasourceGenerator | O | X | X | X | X |
+
+Auth(구 Auth+User), Rule Engine(구 Collector+RuleEngine+Sensor/Storage)은 서비스 통합으로 컬럼이 하나로 줄었습니다.
 
 ---
 
 # 데이터 흐름
 
-Datasource
+DatasourceGenerator
 
 ↓
 
@@ -197,27 +189,19 @@ MQTT
 
 ↓
 
-Rule Engine
+Rule Engine Service
+
+├── 규칙 평가 → 자동 제어
+├── Redis 저장 (최신값)
+└── InfluxDB 저장 (이력)
 
 ↓
 
-RabbitMQ
+AI Service (주간/월간 리포트 요청 시 조회)
 
 ↓
 
-Sensor
-
-├── Redis
-
-└── InfluxDB
-
-↓
-
-AI
-
-↓
-
-Embedding
+Embedding Service
 
 ↓
 
@@ -230,3 +214,6 @@ LLM
 ↓
 
 Client
+
+센서 데이터 수신부터 저장까지는 Rule Engine Service 하나가 전담하며,
+서비스 경계를 넘는 지점(Notification 알림 등)에서만 RabbitMQ를 사용합니다.

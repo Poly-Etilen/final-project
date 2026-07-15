@@ -156,7 +156,7 @@ CSV/DB의 참조 데이터가 변경된 경우 전체 임베딩을 다시 생성
 
 ```
 AI Service (환경 추천용 유사 환경 검색)
-Datasource Service (선택 - 새 재배 데이터 등록 시 임베딩 생성 요청)
+DatasourceGenerator (선택 - 새 재배 데이터 등록 시 임베딩 생성 요청)
 ```
 
 호출하는 서비스

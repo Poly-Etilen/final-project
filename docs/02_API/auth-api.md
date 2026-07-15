@@ -4,10 +4,14 @@
 
 Auth Service에서 제공하는 REST API 명세입니다.
 
+Auth Service는 인증(로그인/토큰/이메일 인증)과 회원 프로필(정보 조회/수정/탈퇴/통계)을 함께 제공합니다.
+(기존 Auth Service + User Service 통합)
+
 Base URL
 
 ```
-/api/v1/auth
+/api/v1/auth   (인증)
+/api/v1/users  (프로필)
 ```
 
 인증 방식
@@ -21,7 +25,7 @@ Base URL
 
 # 이메일 인증 요청
 
-## POST /email/send
+## POST /auth/email/send
 
 회원가입을 위한 이메일 인증번호를 발송합니다.
 
@@ -69,9 +73,7 @@ SMTP 발송
 
 # 이메일 인증 확인
 
-## POST /email/verify
-
-발송된 인증번호를 확인합니다.
+## POST /auth/email/verify
 
 ### Request
 
@@ -92,13 +94,11 @@ SMTP 발송
 }
 ```
 
-인증 성공 여부는 Redis에 임시로 기록되며, 실제 회원 정보는 아직 생성되지 않습니다.
-
 ---
 
 # 회원가입
 
-## POST /signup
+## POST /auth/signup
 
 이메일 인증이 완료된 사용자만 회원가입할 수 있습니다.
 
@@ -107,7 +107,8 @@ SMTP 발송
 ```json
 {
     "email": "mushroom@example.com",
-    "password": "P@ssw0rd123"
+    "password": "P@ssw0rd123",
+    "nickname": "느타리팜"
 }
 ```
 
@@ -127,19 +128,10 @@ Auth Service
 
 ↓
 
-auth_user 생성 (PostgreSQL)
+users 생성 (인증 정보 + 프로필 정보를 하나의 트랜잭션으로 저장)
 
-↓
-
-OpenFeign
-
-↓
-
-User Service
-
-↓
-
-users 프로필 생성 (기본 닉네임 자동 생성)
+Auth+User가 통합되기 전에는 이 시점에 User Service로 별도 OpenFeign 호출이 필요했지만,
+지금은 같은 서비스 내부 로직이라 호출이 없습니다.
 
 ---
 
@@ -155,7 +147,7 @@ users 프로필 생성 (기본 닉네임 자동 생성)
 
 # 로그인
 
-## POST /login
+## POST /auth/login
 
 ### Request
 
@@ -184,28 +176,12 @@ Access Token 유효시간은 30분, Refresh Token 유효시간은 14일이며 Re
 
 # 로그아웃
 
-## POST /logout
+## POST /auth/logout
 
 ### Header
 
 ```
 Authorization: Bearer {accessToken}
-```
-
----
-
-### Process
-
-Auth Service
-
-↓
-
-Redis에서 Refresh Token 삭제
-
-Key
-
-```
-refresh:{userId}
 ```
 
 ---
@@ -222,7 +198,7 @@ refresh:{userId}
 
 # Access Token 재발급
 
-## POST /refresh
+## POST /auth/refresh
 
 ### Request
 
@@ -234,21 +210,47 @@ refresh:{userId}
 
 ---
 
-### Process
+### Response
 
-Auth Service
+```json
+{
+    "accessToken": "eyJhbGciOiJIUzI1NiIs...",
+    "expiresIn": 1800
+}
+```
 
-↓
+---
 
-Redis 조회 (refresh:{userId})
+# 내 정보 조회
 
-↓
+## GET /users/me
 
-Refresh Token 일치 확인
+### Response
 
-↓
+```json
+{
+    "userId": 15,
+    "email": "mushroom@example.com",
+    "nickname": "느타리팜",
+    "profileImageUrl": "https://minio/profile/15.jpg",
+    "createdAt": "2026-07-01T10:00:00"
+}
+```
 
-새로운 Access Token 발급
+---
+
+# 사용자 정보 수정
+
+## PATCH /users/me
+
+### Request
+
+```json
+{
+    "nickname": "새느타리팜",
+    "profileImageUrl": "https://minio/profile/15-new.jpg"
+}
+```
 
 ---
 
@@ -256,8 +258,63 @@ Refresh Token 일치 확인
 
 ```json
 {
-    "accessToken": "eyJhbGciOiJIUzI1NiIs...",
-    "expiresIn": 1800
+    "message": "정보가 수정되었습니다."
+}
+```
+
+---
+
+# 회원 탈퇴
+
+## DELETE /users/me
+
+### Process
+
+Auth Service
+
+↓
+
+users Soft Delete + Refresh Token 삭제 (같은 서비스 내부 처리, 즉시 수행)
+
+↓
+
+RabbitMQ Publish
+
+↓
+
+UserDeletedEvent
+
+↓
+
+Cultivation Service (재배 데이터 비활성화)
+
+Auth+User가 분리되어 있던 시절에는 Refresh Token 삭제도 이벤트를 구독해서 처리했지만,
+통합 이후에는 같은 서비스 내부라 즉시 처리하고 이벤트는 Cultivation Service를 위해서만 발행합니다.
+
+---
+
+### Response
+
+```json
+{
+    "message": "회원 탈퇴가 완료되었습니다."
+}
+```
+
+---
+
+# 내 재배 통계 조회
+
+## GET /users/me/statistics
+
+### Response
+
+```json
+{
+    "totalCultivationCount": 12,
+    "totalHarvestWeight": 38400,
+    "averageCultivationDays": 26,
+    "mostCultivatedMushroomType": "OYSTER"
 }
 ```
 
@@ -274,24 +331,38 @@ Refresh Token 일치 확인
 | A005 | 인증번호 불일치 또는 만료 |
 | A006 | 만료된 Access Token |
 | A007 | 만료된 Refresh Token 또는 불일치 |
-| A008 | User Service 프로필 생성 실패 |
+| A008 | 존재하지 않는 사용자 |
+| A009 | 중복 닉네임 |
+| A010 | 이미 탈퇴한 사용자 |
 
 ---
 
 # OpenFeign
 
+호출하는 서비스
+
 ```
-Auth Service
+없음
+```
 
-↓
+호출받는 서비스
 
-User Service (회원가입 시 프로필 생성)
+```
+Cultivation Service (사용자 정보 조회)
 ```
 
 ---
 
 # Event
 
-현재 발행하는 이벤트는 없습니다.
+## 발행 이벤트
 
-회원가입은 OpenFeign을 통한 동기 처리로 이루어집니다.
+### UserDeletedEvent
+
+회원 탈퇴 시 발행됩니다.
+
+구독 서비스
+
+```
+Cultivation Service (재배 데이터 비활성화)
+```

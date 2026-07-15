@@ -32,7 +32,7 @@ Cache Miss
 
 ↓
 
-Sensor Service
+Rule Engine Service
 
 ↓
 
@@ -122,7 +122,7 @@ Redis에 없으면
 
 ↓
 
-Sensor Service 호출
+Rule Engine Service 호출
 
 (OpenFeign)
 
@@ -130,7 +130,7 @@ Sensor Service 호출
 
 ## 4. 센서 데이터 조회
 
-Sensor Service
+Rule Engine Service
 
 ↓
 
@@ -242,7 +242,7 @@ AI 응답 Cache
 
 ## InfluxDB
 
-센서 통계 조회 (Sensor Service 경유)
+센서 통계 조회 (Rule Engine Service 경유)
 
 ---
 
@@ -259,7 +259,7 @@ AI Service
 
 ↓
 
-Sensor Service
+Rule Engine Service
 
 ↓
 
@@ -279,7 +279,7 @@ Embedding Service
 # 예외 상황
 
 - Redis 장애
-- Sensor Service 호출 실패
+- Rule Engine Service 호출 실패
 - Embedding 검색 실패
 - LLM 응답 실패
 - 부적절한 질문 입력

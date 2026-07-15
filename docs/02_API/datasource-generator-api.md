@@ -1,11 +1,11 @@
-# Datasource API
+# DatasourceGenerator API
 
 ## 개요
 
-Datasource Service에서 제공하는 REST API 명세입니다.
+DatasourceGenerator에서 제공하는 REST API 명세입니다. (기존 명칭: Datasource API)
 
 IoT 데이터 소스 및 센서 "장치"를 등록/관리합니다. 센서가 측정한 환경 값 자체의 조회는
-Sensor API(`/api/v1/sensors/current` 등)를 참고하세요. 이 문서는 장치 메타데이터 관리용입니다.
+Rule Engine API(`/api/v1/sensors/current` 등)를 참고하세요. 이 문서는 장치 메타데이터 관리용입니다.
 
 Base URL
 
@@ -24,17 +24,20 @@ Bearer JWT (관리자 권한)
 
 # ⚠️ 알려진 이슈: /sensors 경로 충돌
 
-Datasource Service(장치 등록: `POST /sensors`, `GET /sensors`, `GET /sensors/{sensorId}`)와
-Sensor Service(측정값 조회: `GET /sensors/current`, `GET /sensors/statistics` 등)가
+DatasourceGenerator(장치 등록: `POST /sensors`, `GET /sensors`, `GET /sensors/{sensorId}`)와
+Rule Engine Service(측정값 조회: `GET /sensors/current`, `GET /sensors/statistics` 등)가
 동일한 `/api/v1/sensors` 경로 프리픽스를 사용하고 있습니다.
+
+서비스를 통합(Auth+User, Collector+RuleEngine+Storage)하면서 서비스 개수는 줄었지만,
+이 경로 충돌은 두 서비스가 여전히 분리되어 있어 그대로 남아 있습니다.
 
 API Gateway가 서비스 이름이 아닌 경로만으로 라우팅할 경우 충돌 가능성이 있으므로,
 아래 중 하나로 확정이 필요합니다.
 
-- Datasource Service의 장치 관리 경로를 `/api/v1/devices`로 변경
-- Gateway 라우팅 규칙에 서비스 접두사 추가 (예: `/api/v1/datasource-service/sensors`)
+- DatasourceGenerator의 장치 관리 경로를 `/api/v1/devices`로 변경
+- Gateway 라우팅 규칙에 서비스 접두사 추가 (예: `/api/v1/datasource-generator/sensors`)
 
-이 문서에서는 현행 도메인 문서(datasource.md) 기준인 `/sensors`를 그대로 표기합니다.
+이 문서에서는 현행 도메인 문서(datasource-generator.md) 기준인 `/sensors`를 그대로 표기합니다.
 
 ---
 
@@ -203,4 +206,10 @@ Payload
 
 # Event
 
-현재 이벤트를 발행하지 않습니다. 센서 데이터는 MQTT를 통해서만 전송합니다.
+## 구독 이벤트
+
+```
+SensorErrorEvent (Rule Engine Service 발행) - sensor.status 갱신
+```
+
+발행하는 이벤트는 없습니다. 센서 데이터는 MQTT를 통해서만 전송합니다.

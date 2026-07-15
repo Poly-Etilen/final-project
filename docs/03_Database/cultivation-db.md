@@ -379,7 +379,7 @@ Harvest 생성
 # 관계
 
 ```
-User Service
+Auth Service
 
 ↓
 

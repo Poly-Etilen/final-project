@@ -261,7 +261,7 @@ AI 리포트 조회
 
 ---
 
-### Sensor Service
+### Rule Engine Service
 
 현재 센서 상태 조회
 

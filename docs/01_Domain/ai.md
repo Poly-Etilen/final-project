@@ -125,7 +125,7 @@ Vision 모델은 사전에 다양한 성장 단계의 사진으로 학습되어 
 
 ## AI 리포트
 
-Sensor Service에서 집계한
+Rule Engine Service에서 집계한
 주간 및 월간 데이터를 분석하여
 AI 리포트를 생성합니다.
 
@@ -201,7 +201,7 @@ AI Service는 Vision 분석을 위해 사진을 조회합니다.
 
 ---
 
-### Sensor Service
+### Rule Engine Service
 
 - 센서 데이터 조회
 - 주간 데이터 조회
@@ -228,7 +228,7 @@ AI Service는 Vision 분석을 위해 사진을 조회합니다.
 
 ### WeeklyReportCompletedEvent
 
-Sensor Service의 Weekly Scheduler가 집계한 데이터를 받아 AI 리포트 생성이 완료되면 발행합니다.
+Rule Engine Service의 Weekly Scheduler가 집계한 데이터를 받아 AI 리포트 생성이 완료되면 발행합니다.
 
 구독 서비스: Notification Service
 
@@ -300,7 +300,7 @@ Scheduler
 
 ↓
 
-Sensor Service
+Rule Engine Service
 
 ↓
 

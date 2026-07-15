@@ -2,16 +2,17 @@
 
 ## 서비스 구성
 
+8개 서비스(API Gateway 포함)로 구성합니다. 강사 피드백("합칠 수 있는 건 합쳐라")에 따라
+기존 9개 서비스에서 Auth+User, Collector+RuleEngine+Storage를 각각 하나로 통합했습니다.
+
 - API Gateway
-- Auth Service
-- User Service
+- Auth Service (기존 Auth+User 통합)
 - Cultivation Service
 - AI Service
 - Embedding Service
-- Sensor Service
-- Datasource Service
-- Rule Engine Service
+- Rule Engine Service (기존 Collector+RuleEngine+Sensor/Storage 통합)
 - Notification Service
+- DatasourceGenerator (기존 Datasource Service 리네임)
 
 ---
 
@@ -19,10 +20,9 @@
 
 ### PostgreSQL
 
-- Auth
-- User
+- Auth (users 단일 테이블)
 - Cultivation
-- Datasource
+- DatasourceGenerator
 
 ---
 

@@ -1,13 +1,13 @@
-# Datasource Database
+# DatasourceGenerator Database
 
 ## 개요
 
-Datasource Database는 센서 및 데이터 소스를 관리합니다.
+DatasourceGenerator Database는 센서 및 데이터 소스를 관리합니다. (기존 명칭: Datasource Database)
 
 실제 센서 데이터는 저장하지 않으며,
 센서의 메타데이터와 데이터 소스 정보를 관리합니다.
 
-센서에서 측정된 데이터는 MQTT를 통해 Rule Engine으로 전달됩니다.
+센서에서 측정된 데이터는 MQTT를 통해 Rule Engine Service로 전달됩니다.
 
 ---
 
@@ -197,6 +197,8 @@ ON sensor(status);
 | ERROR | 오류 |
 | MAINTENANCE | 점검 중 |
 
+sensor.status는 Rule Engine Service가 발행하는 SensorErrorEvent를 구독해 갱신합니다.
+
 ---
 
 # 데이터 흐름
@@ -217,7 +219,7 @@ MQTT Publish
 
 ↓
 
-Rule Engine
+Rule Engine Service
 
 ---
 
@@ -242,7 +244,7 @@ Cultivation (ID 참조)
 
     ▼
 
-MQTT
+MQTT → Rule Engine Service
 ```
 
 ---
@@ -251,6 +253,6 @@ MQTT
 
 - 실제 센서 데이터는 PostgreSQL에 저장하지 않습니다.
 - 센서의 메타데이터만 저장합니다.
-- 센서값은 MQTT를 통해 Rule Engine으로 전달됩니다.
-- 시계열 데이터는 Sensor Service(InfluxDB)에서 관리합니다.
+- 센서값은 MQTT를 통해 Rule Engine Service로 전달됩니다.
+- 시계열 데이터는 Rule Engine Service(InfluxDB)에서 관리합니다.
 - 하나의 Datasource에는 여러 개의 Sensor가 연결될 수 있습니다.

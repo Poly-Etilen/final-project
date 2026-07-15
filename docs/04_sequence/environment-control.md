@@ -2,11 +2,15 @@
 
 ## 개요
 
-센서에서 수집한 환경 데이터를 기반으로 Rule Engine이 목표 환경과 비교하여
+센서에서 수집한 환경 데이터를 기반으로 Rule Engine Service가 목표 환경과 비교하여
 자동 제어 여부를 판단합니다.
 
-제어가 필요한 경우 제어 명령을 생성하고,
-사용자에게 알림을 전송합니다.
+Rule Engine Service는 MQTT 수신, 규칙 평가, Redis/InfluxDB 저장까지 하나의 서비스에서 처리합니다.
+(기존에는 Rule Engine이 RabbitMQ를 거쳐 별도의 Sensor Service에 저장을 위임했으나,
+서비스 통합으로 내부 처리로 단순화되었습니다. RabbitMQ는 이제 Notification Service 등
+진짜 외부 서비스에 알릴 때만 사용합니다.)
+
+제어가 필요한 경우 제어 명령을 생성하고, 사용자에게 알림을 전송합니다.
 
 ---
 
@@ -17,7 +21,7 @@ Sensor
 
 ↓
 
-Datasource Service
+DatasourceGenerator
 
 ↓
 
@@ -25,26 +29,16 @@ MQTT Broker
 
 ↓
 
-Rule Engine
+Rule Engine Service
 
-↓
-
-환경 비교
-
-↓
-
-제어 여부 판단
+├── 환경 비교
+├── 제어 여부 판단
+├── Redis 저장 (내부)
+└── InfluxDB 저장 (내부)
 
 ↓
 
 RabbitMQ
-
-↓
-
-Sensor Service
-
-├── Redis 저장
-└── InfluxDB 저장
 
 ↓
 
@@ -85,7 +79,7 @@ Discord
 
 ## 2. MQTT Publish
 
-Datasource Service가
+DatasourceGenerator가
 
 MQTT Broker로 데이터를 Publish합니다.
 
@@ -97,9 +91,9 @@ sensor/{cultivationId}
 
 ---
 
-## 3. Rule Engine 수신
+## 3. Rule Engine Service 수신
 
-Rule Engine이
+Rule Engine Service가
 
 MQTT를 Subscribe합니다.
 
@@ -111,7 +105,7 @@ MQTT를 Subscribe합니다.
 
 ## 4. 목표 환경 조회
 
-Rule Engine은
+Rule Engine Service는
 
 현재 재배의 목표 환경을 조회합니다.
 
@@ -163,6 +157,7 @@ Humidity
 
 차이
 
+```
 8%
 ```
 
@@ -170,7 +165,7 @@ Humidity
 
 ## 6. 자동 제어 판단
 
-Rule Engine
+Rule Engine Service
 
 ↓
 
@@ -198,36 +193,9 @@ Cooling Fan ON
 
 ---
 
-## 7. RabbitMQ Publish
+## 7. Redis / InfluxDB 저장 (내부 처리)
 
-Rule Engine은
-
-EnvironmentControlEvent를 발행합니다.
-
-```json
-{
-    "cultivationId":3,
-    "temperature":20.5,
-    "humidity":82,
-    "co2":980,
-    "light":310,
-    "action":"HUMIDIFIER_ON"
-}
-```
-
----
-
-## 8. Sensor Service
-
-RabbitMQ Subscribe
-
-↓
-
-Redis 저장
-
-↓
-
-InfluxDB 저장
+같은 서비스 내부에서 즉시 저장합니다.
 
 Redis
 
@@ -243,9 +211,28 @@ InfluxDB
 
 ---
 
+## 8. RabbitMQ Publish
+
+Rule Engine Service는
+
+EnvironmentControlEvent를 발행합니다. (Notification Service 전달용)
+
+```json
+{
+    "cultivationId":3,
+    "temperature":20.5,
+    "humidity":82,
+    "co2":980,
+    "light":310,
+    "action":"HUMIDIFIER_ON"
+}
+```
+
+---
+
 ## 9. Notification Service
 
-동일 이벤트를 구독합니다.
+이벤트를 구독합니다.
 
 ↓
 
@@ -267,19 +254,19 @@ InfluxDB
 
 ## Redis
 
-현재 환경 저장
+현재 환경 저장 (Rule Engine Service 내부)
 
 ---
 
 ## InfluxDB
 
-환경 이력 저장
+환경 이력 저장 (Rule Engine Service 내부)
 
 ---
 
 # MQTT
 
-Topic
+Subscribe
 
 ```
 sensor/{cultivationId}
@@ -289,7 +276,7 @@ sensor/{cultivationId}
 
 # RabbitMQ
 
-Publish
+Publish (다른 서비스로 전달할 때만 사용)
 
 ```
 EnvironmentControlEvent
@@ -297,7 +284,6 @@ EnvironmentControlEvent
 
 Subscribe
 
-- Sensor Service
 - Notification Service
 
 ---
@@ -306,7 +292,7 @@ Subscribe
 
 사용하지 않습니다.
 
-환경 제어는 비동기 이벤트 기반으로 처리합니다.
+환경 제어는 MQTT 수신과 내부 처리, RabbitMQ 알림 전달로 구성됩니다.
 
 ---
 
@@ -326,18 +312,17 @@ Subscribe
 # 예외 상황
 
 - MQTT 연결 실패
-- Rule Engine 오류
-- RabbitMQ 장애
+- 규칙 평가 오류
 - Redis 저장 실패
 - InfluxDB 저장 실패
+- RabbitMQ 발행 실패
 - Notification 전송 실패
 
 ---
 
 # 고려 사항
 
-- Rule Engine은 현재 환경과 목표 환경만 비교합니다.
-- 제어 결과는 RabbitMQ를 통해 각 서비스로 전달합니다.
-- 최신 데이터는 Redis에 저장합니다.
-- 모든 이력은 InfluxDB에 저장합니다.
+- Rule Engine Service는 현재 환경과 목표 환경 비교, 저장까지 하나의 서비스에서 처리하여 지연을 줄입니다.
+- RabbitMQ는 Notification Service처럼 실제로 분리된 서비스에 알릴 때만 사용합니다.
+- 최신 데이터는 Redis에, 모든 이력은 InfluxDB에 저장합니다.
 - Notification Service는 이벤트만 수신하며 제어에는 관여하지 않습니다.

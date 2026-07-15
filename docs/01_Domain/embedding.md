@@ -133,7 +133,7 @@ mushroom_environment
 - 환경 추천 요청
 - 벡터 검색 요청
 
-### Datasource Service (선택)
+### DatasourceGenerator (선택)
 
 - 새로운 재배 데이터 등록 시 임베딩 생성 요청
 
@@ -191,7 +191,7 @@ LLM
 
 ## 임베딩 생성
 
-Datasource Service
+DatasourceGenerator
 
 ↓
 

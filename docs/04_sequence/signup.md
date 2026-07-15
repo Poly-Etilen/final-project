@@ -4,7 +4,9 @@
 
 사용자가 이메일 회원가입을 진행하는 과정입니다.
 
-회원가입은 Auth Service와 User Service가 협력하여 처리합니다.
+Auth Service(기존 Auth+User 통합)가 이메일 인증부터 사용자 생성까지 단일 트랜잭션으로 처리합니다.
+(기존에는 Auth Service가 auth_user 생성 후 User Service를 OpenFeign으로 호출해 프로필을 별도 생성했으나,
+서비스 통합으로 서비스 간 호출 없이 하나의 트랜잭션으로 처리합니다.)
 
 ---
 
@@ -51,23 +53,11 @@ Redis
 
 ↓
 
-회원 생성
+회원 생성 (users, 단일 트랜잭션)
 
 ↓
 
 PostgreSQL(Auth)
-
-↓
-
-User Service 호출
-
-↓
-
-사용자 프로필 생성
-
-↓
-
-PostgreSQL(User)
 
 ↓
 
@@ -94,7 +84,7 @@ PostgreSQL(Auth)
 
 ↓
 
-중복 여부 확인
+`users` 테이블에서 중복 여부 확인
 
 ---
 
@@ -146,29 +136,31 @@ Redis 검증
 
 ## 6. 회원 생성
 
-auth_user 생성
+예시
+
+```http
+POST /auth/signup
+```
+
+```json
+{
+    "email":"test@test.com",
+    "password":"P@ssw0rd!",
+    "nickname":"버섯초보"
+}
+```
 
 ↓
 
-PostgreSQL
+`users` 생성 (email, password, role, email_verified, nickname 등 전체 프로필 컬럼 포함)
+
+↓
+
+PostgreSQL 저장 (단일 트랜잭션, 서비스 간 호출 없음)
 
 ---
 
-## 7. User Service 호출
-
-OpenFeign
-
-↓
-
-User Service
-
-↓
-
-users 생성
-
----
-
-## 8. 완료
+## 7. 완료
 
 회원가입 성공
 
@@ -179,12 +171,6 @@ users 생성
 ## PostgreSQL
 
 Auth
-
-```
-auth_user
-```
-
-User
 
 ```
 users
@@ -202,13 +188,9 @@ email:{email}
 
 # OpenFeign
 
-```
-Auth
+사용하지 않습니다.
 
-↓
-
-User
-```
+기존에는 Auth → User Service 호출이 있었으나, 서비스 통합으로 내부 처리로 단순화되었습니다.
 
 ---
 
@@ -225,5 +207,4 @@ User
 - 이메일 중복
 - 인증번호 만료
 - 인증번호 불일치
-- User Service 호출 실패
 - DB 저장 실패

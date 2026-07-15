@@ -1,11 +1,11 @@
-# Sensor API
+# Rule Engine API
 
 ## 개요
 
-Sensor Service에서 제공하는 REST API 명세입니다.
+Rule Engine Service에서 제공하는 REST API 명세입니다. (기존 명칭: Sensor API)
 
-환경 측정 데이터(현재값, 통계, 차트)를 제공하며, 센서 장치 자체를 등록/관리하지는 않습니다.
-장치 등록/관리는 Datasource API를 참고하세요.
+MQTT 수신, 규칙 평가/자동 제어, 환경 측정 데이터(현재값, 통계, 차트) 조회까지 하나의 서비스가 제공합니다.
+센서 "장치" 자체의 등록/관리는 DatasourceGenerator API를 참고하세요.
 
 Base URL
 
@@ -19,9 +19,9 @@ Base URL
 Bearer JWT
 ```
 
-⚠️ Datasource Service도 `/api/v1/sensors`로 시작하는 경로(장치 등록)를 사용합니다.
+⚠️ DatasourceGenerator도 `/api/v1/sensors`로 시작하는 경로(장치 등록)를 사용합니다.
 Gateway 라우팅 시 HTTP Method와 세부 경로만으로 두 서비스를 구분하기 어려우므로,
-서비스 식별을 위한 경로 컨벤션 확정이 필요합니다. (datasource-api.md 참고)
+서비스 식별을 위한 경로 컨벤션 확정이 필요합니다. (datasource-generator-api.md 참고)
 
 ---
 
@@ -39,7 +39,7 @@ cultivationId (required)
 
 ### Process
 
-Sensor Service
+Rule Engine Service
 
 ↓
 
@@ -80,7 +80,7 @@ period (required) - 예: 1h, 24h, 7d, 30d
 
 ### Process
 
-Sensor Service
+Rule Engine Service
 
 ↓
 
@@ -184,6 +184,8 @@ cultivationId (required)
 | S003 | 잘못된 period 값 |
 | S004 | Redis 조회 실패 |
 | S005 | InfluxDB 조회 실패 |
+| S006 | MQTT Broker 연결 실패 |
+| S007 | 규칙 평가/장치 제어 실패 |
 
 ---
 
@@ -193,23 +195,35 @@ cultivationId (required)
 
 ```
 AI Service (센서 데이터 조회, 주간/월간 데이터 조회)
-Cultivation Service (현재 센서 상태 조회, 환경 통계 조회)
+Cultivation Service (현재 센서 상태 조회, 환경 통계 조회, 목표 환경 조회)
 ```
 
 호출하는 서비스
 
 ```
-없음
+Cultivation Service (규칙 평가 시 목표 환경 조회)
 ```
+
+---
+
+# MQTT
+
+Subscribe Topic
+
+```
+sensor/+
+```
+
+DatasourceGenerator가 발행한 센서 데이터를 직접 구독하여 규칙 평가와 저장까지 한 번에 처리합니다.
+(기존에는 별도 서비스가 RabbitMQ로 이 데이터를 다시 전달받았으나, 서비스 통합으로 내부 처리로 단순화되었습니다.)
 
 ---
 
 # RabbitMQ
 
-Subscribe
+Publish (다른 서비스로 전달할 때만 사용)
 
 ```
-EnvironmentControlEvent (Rule Engine 발행)
+EnvironmentControlEvent → Notification Service
+SensorErrorEvent → DatasourceGenerator, Notification Service
 ```
-
-수신 데이터를 Redis(최신값) + InfluxDB(이력)에 저장합니다.
