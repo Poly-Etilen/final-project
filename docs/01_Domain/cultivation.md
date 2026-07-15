@@ -217,8 +217,8 @@ Cultivation Service는 별도의 PostgreSQL Database를 사용합니다.
 ### Table
 
 - cultivation
-- cultivation_environment
-- harvest_history
+- environment_setting
+- harvest
 - photo
 
 ---

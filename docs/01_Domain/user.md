@@ -112,7 +112,7 @@ User Service는 별도의 PostgreSQL Database를 사용합니다.
 
 ### Table
 
-- user
+- users
 
 ---
 
@@ -147,7 +147,8 @@ User Service는 별도의 PostgreSQL Database를 사용합니다.
 
 구독 서비스
 
-- Cultivation Service
+- Auth Service (Refresh Token 삭제)
+- Cultivation Service (재배 데이터 비활성화)
 
 ---
 
@@ -189,7 +190,7 @@ User Service
 
 ↓
 
-User 삭제
+User Soft Delete
 
 ↓
 
@@ -197,11 +198,8 @@ UserDeletedEvent 발행
 
 ↓
 
-Cultivation Service
-
-↓
-
-재배 데이터 비활성화
+├── Auth Service → Refresh Token 삭제
+└── Cultivation Service → 재배 데이터 비활성화
 
 ---
 

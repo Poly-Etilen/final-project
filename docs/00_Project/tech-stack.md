@@ -33,6 +33,10 @@
 
 - 버섯 재배 환경 임베딩(Vector Search)
 
+### MinIO
+
+- 사용자가 업로드한 생육 사진(이미지) 저장
+
 ---
 
 ## AI
@@ -41,6 +45,7 @@
 - OpenAI API (또는 Gemini API)
 - RAG (Retrieval-Augmented Generation)
 - Embedding
+- Vision 모델 (생육 사진 분석 - 균사 성장률/갓 크기/색상/병충해 판별)
 
 ---
 

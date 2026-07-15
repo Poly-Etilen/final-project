@@ -224,7 +224,25 @@ AI Service는 Vision 분석을 위해 사진을 조회합니다.
 
 # Event
 
-현재 이벤트를 발행하지 않습니다.
+## 발행 이벤트
+
+### WeeklyReportCompletedEvent
+
+Sensor Service의 Weekly Scheduler가 집계한 데이터를 받아 AI 리포트 생성이 완료되면 발행합니다.
+
+구독 서비스: Notification Service
+
+---
+
+### MonthlyReportCompletedEvent
+
+Monthly Scheduler 기반 AI 리포트 생성이 완료되면 발행합니다.
+
+구독 서비스: Notification Service
+
+---
+
+생육 분석(Vision), 환경 추천, 챗봇은 사용자 요청에 대한 동기 응답으로 결과가 즉시 전달되므로 별도 이벤트를 발행하지 않습니다.
 
 ---
 

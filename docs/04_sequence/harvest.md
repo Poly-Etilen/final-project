@@ -240,10 +240,10 @@ PATCH /api/v1/cultivations/{cultivationId}/finish
 
 Cultivation Service는
 
-harvest_history에 수확 정보를 저장합니다.
+harvest 테이블에 수확 정보를 저장합니다.
 
 ```
-harvest_history
+harvest
 ```
 
 ---
@@ -327,7 +327,7 @@ RabbitMQ Subscribe
 ```
 cultivation
 
-harvest_history
+harvest
 
 photo
 ```

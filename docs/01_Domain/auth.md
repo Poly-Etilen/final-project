@@ -140,7 +140,9 @@ Value
 
 ## 호출하는 서비스
 
-없음
+### User Service
+
+- 회원가입 시 사용자 프로필 생성 요청 (OpenFeign)
 
 ---
 

@@ -27,7 +27,7 @@ FK  auth_user_id
 
 # Table
 
-## user
+## users
 
 | 컬럼명 | 타입 | NULL | 설명 |
 |---------|------|------|------|

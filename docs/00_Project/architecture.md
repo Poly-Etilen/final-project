@@ -51,6 +51,15 @@
 
 ---
 
+### MinIO
+
+사용자가 업로드한 생육 사진 저장
+
+- Cultivation Service가 업로드
+- AI Service가 Vision 분석을 위해 읽기 전용으로 조회
+
+---
+
 ## 메시지 브로커
 
 ### MQTT
@@ -64,6 +73,8 @@
 ---
 
 ## AI
+
+### 환경 추천 / 챗봇 / 리포트
 
 Spring AI
 
@@ -81,12 +92,22 @@ LLM
 
 ↓
 
-환경 추천
+환경 추천 / 챗봇 답변 / AI 리포트
+
+---
+
+### 생육 분석 (Vision)
+
+사용자가 촬영한 사진 업로드 (Cultivation Service → MinIO)
 
 ↓
 
-생육 분석
+AI Service Vision 모델
 
 ↓
 
-AI 리포트
+균사 성장률 / 갓 크기 / 색상 / 병충해 판별
+
+↓
+
+LLM (결과 해석 및 개선 방안 생성)

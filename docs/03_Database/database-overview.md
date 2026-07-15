@@ -36,7 +36,7 @@
 
 ### Table
 
-- user
+- users
 
 ---
 
@@ -49,8 +49,9 @@
 ### Table
 
 - cultivation
-- cultivation_environment
-- harvest_history
+- environment_setting
+- harvest
+- photo
 
 ---
 
