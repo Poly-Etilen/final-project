@@ -144,7 +144,10 @@ Redis(최신값)/InfluxDB(이력)에 저장합니다.
 ## 센서 오류 감지
 
 수신 주기와 데이터 유효성을 검사하여 센서 오류(OFFLINE/ERROR)를 감지하고,
-DatasourceGenerator의 센서 상태를 갱신하도록 이벤트를 발행합니다.
+Cultivation Service의 센서 상태를 갱신하도록 이벤트를 발행합니다.
+
+> ℹ️ **변경 이력**: 센서 장치 CRUD가 DatasourceGenerator에서 Cultivation Service로 이전되면서,
+> SensorErrorEvent의 구독 주체도 DatasourceGenerator에서 Cultivation Service로 함께 옮겨졌습니다.
 
 ---
 
@@ -319,7 +322,7 @@ Cultivation Service가 environment_setting을 생성/수정할 때 발행합니�
 
 센서 오류/연결 해제가 감지되었을 때 발행합니다.
 
-구독 서비스: DatasourceGenerator (센서 상태 갱신), Notification Service (알림)
+구독 서비스: Cultivation Service (sensor.status 갱신), Notification Service (알림)
 
 ---
 

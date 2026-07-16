@@ -225,6 +225,85 @@ RabbitMQ로 EnvironmentRangeUpdatedEvent를 발행합니다. (Rule Engine Servic
 
 ---
 
+# 센서 등록
+
+## POST /{cultivationId}/sensors
+
+### Request
+
+```json
+{
+    "name": "온도 센서 1",
+    "sensorType": "TEMPERATURE",
+    "datasourceId": 1
+}
+```
+
+---
+
+### Response
+
+```json
+{
+    "sensorId": 4,
+    "sensorUuid": "b3f1c2a0-...",
+    "message": "센서가 등록되었습니다."
+}
+```
+
+등록과 동시에 RabbitMQ로 `SensorRegisteredEvent`를 발행합니다. (DatasourceGenerator의
+sensor_cache 갱신용)
+
+---
+
+# 센서 목록 조회
+
+## GET /{cultivationId}/sensors
+
+### Response
+
+```json
+[
+    { "sensorId": 4, "name": "온도 센서 1", "sensorType": "TEMPERATURE", "status": "ONLINE" }
+]
+```
+
+---
+
+# 센서 상세 조회
+
+## GET /{cultivationId}/sensors/{sensorId}
+
+### Response
+
+```json
+{
+    "sensorId": 4,
+    "name": "온도 센서 1",
+    "sensorType": "TEMPERATURE",
+    "status": "ONLINE",
+    "installedAt": "2026-07-01T09:00:00"
+}
+```
+
+---
+
+# 센서 삭제
+
+## DELETE /{cultivationId}/sensors/{sensorId}
+
+### Response
+
+```json
+{
+    "message": "센서가 삭제되었습니다."
+}
+```
+
+삭제와 동시에 RabbitMQ로 `SensorDeletedEvent`를 발행합니다.
+
+---
+
 # Error Code
 
 | Code | Description |
@@ -234,6 +313,8 @@ RabbitMQ로 EnvironmentRangeUpdatedEvent를 발행합니다. (Rule Engine Servic
 | C003 | 권한 없음 |
 | C004 | 환경 저장 실패 |
 | C005 | 지원하지 않는 버섯 종류 (mushroom_reference에 없음) |
+| C006 | 존재하지 않는 센서 |
+| C007 | 존재하지 않는 데이터 소스 (datasourceId 유효성 확인 실패) |
 
 ---
 
@@ -244,6 +325,8 @@ RabbitMQ로 EnvironmentRangeUpdatedEvent를 발행합니다. (Rule Engine Servic
 - AI Service
 - Sensor Service
 
+센서 등록/삭제는 DatasourceGenerator를 동기 호출하지 않고 이벤트(RabbitMQ)로만 전달합니다.
+
 ---
 
 # Event
@@ -253,3 +336,9 @@ RabbitMQ로 EnvironmentRangeUpdatedEvent를 발행합니다. (Rule Engine Servic
 - CultivationCreatedEvent
 - CultivationFinishedEvent
 - EnvironmentRangeUpdatedEvent
+- SensorRegisteredEvent (센서 등록 시, 구독: DatasourceGenerator)
+- SensorDeletedEvent (센서 삭제 시, 구독: DatasourceGenerator)
+
+구독 이벤트
+
+- SensorErrorEvent (Rule Engine Service 발행, sensor.status 갱신용)

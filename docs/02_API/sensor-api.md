@@ -7,8 +7,9 @@ Sensor Service에서 제공하는 REST API 명세입니다.
 Rule Engine Service로부터 RabbitMQ(EnvironmentMeasuredEvent)로 전달받아 저장한 센서 측정값을
 현재값/통계/차트/주간·월간 리포트 형태로 조회할 수 있습니다.
 
-센서 "장치" 자체의 등록/관리는 DatasourceGenerator API를, MQTT 수신·규칙 평가·자동 제어는
-Rule Engine Service(REST API 없음, rule-Engine.md 참고)를 확인하세요.
+센서 "장치" 자체의 등록/조회/삭제는 Cultivation Service API(`/api/v1/cultivations/{id}/sensors`)를,
+MQTT 수신·규칙 평가·자동 제어는 Rule Engine Service(REST API 없음, rule-Engine.md 참고)를
+확인하세요.
 
 Base URL
 
@@ -22,9 +23,10 @@ Base URL
 Bearer JWT
 ```
 
-⚠️ DatasourceGenerator도 `/api/v1/sensors`로 시작하는 경로(장치 등록)를 사용합니다.
-Gateway 라우팅 시 HTTP Method와 세부 경로만으로 두 서비스를 구분하기 어려우므로,
-서비스 식별을 위한 경로 컨벤션 확정이 필요합니다. (datasource-generator-api.md 참고)
+> ℹ️ **변경 이력**: 이전에는 DatasourceGenerator도 `/api/v1/sensors`로 시작하는 경로(장치 등록)를
+> 사용해 경로 충돌 이슈가 있었습니다. 센서 장치 CRUD가 Cultivation Service
+> (`/api/v1/cultivations/{id}/sensors`)로 옮겨지면서 이 충돌은 해소되었고, 이제
+> `/api/v1/sensors`는 이 API(측정값 조회)만 사용합니다.
 
 ---
 

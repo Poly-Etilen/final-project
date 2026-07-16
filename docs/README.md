@@ -38,13 +38,13 @@ API Gateway를 포함해 9개 서비스로 구성됩니다. (기존 9개 서비�
 |--------|-----------|--------|-----|----------|----------------|
 | API Gateway | 라우팅, 인증 토큰 검증 | - | - | - | 전체 시퀀스 최초 진입점 |
 | Auth | 인증/인가, JWT, 이메일 인증, 회원 프로필/탈퇴/재배 통계 (기존 Auth+User 통합) | [auth.md](./01_Domain/auth.md) | [auth-api.md](./02_API/auth-api.md) | [auth-db.md](./03_Database/auth-db.md) | [signup](./04_sequence/signup.md), [login](./04_sequence/login.md), [withdraw](./04_sequence/withdraw.md) |
-| Cultivation | 재배 생성/관리/수확/사진 업로드, 공공데이터 기반 환경 추천(`mushroom_reference` 조회) | [cultivation.md](./01_Domain/cultivation.md) | [cultivation-api.md](./02_API/cultivation-api.md) | [cultivation-db.md](./03_Database/cultivation-db.md) | [create-cultivation](./04_sequence/create-cultivation.md), [harvest](./04_sequence/harvest.md), [growth-analysis](./04_sequence/growth-analysis.md) |
+| Cultivation | 재배 생성/관리/수확/사진 업로드, 공공데이터 기반 환경 추천(`mushroom_reference` 조회), 센서 장치 등록/조회/삭제 | [cultivation.md](./01_Domain/cultivation.md) | [cultivation-api.md](./02_API/cultivation-api.md) | [cultivation-db.md](./03_Database/cultivation-db.md) | [create-cultivation](./04_sequence/create-cultivation.md), [harvest](./04_sequence/harvest.md), [growth-analysis](./04_sequence/growth-analysis.md), [sensor-error](./04_sequence/sensor-error.md) |
 | AI | 생육 분석(Vision), 챗봇, 리포트 | [ai.md](./01_Domain/ai.md) | [ai-api.md](./02_API/ai-api.md) | Redis(캐시), MinIO(읽기 전용) | [growth-analysis](./04_sequence/growth-analysis.md), [harvest](./04_sequence/harvest.md), [ai-chat](./04_sequence/ai-chat.md), [ai-report](./04_sequence/ai-report.md) |
 | Embedding | 재배 참조 데이터 임베딩·벡터 검색 (AI 챗봇 유사 사례 검색용) | [embedding.md](./01_Domain/embedding.md) | [embedding-api.md](./02_API/embedding-api.md) | [elasticSearch.md](./03_Database/elasticSearch.md) | [ai-chat](./04_sequence/ai-chat.md) |
 | Rule Engine | MQTT 수신(Collector), 검증, 규칙 평가/자동 제어, 센서 오류 감지 | [rule-Engine.md](./01_Domain/rule-Engine.md) | API 없음 (MQTT/RabbitMQ 기반, [rule-engine-api.md](./02_API/rule-engine-api.md) 참고) | Redis(목표 환경 범위 캐시만, 영구 저장소 없음) | [sensor-data](./04_sequence/sensor-data.md), [environment-control](./04_sequence/environment-control.md), [sensor-error](./04_sequence/sensor-error.md) |
 | Sensor | 측정값 저장(Redis/InfluxDB)·조회·통계·주간월간 리포트 집계 | [sensor.md](./01_Domain/sensor.md) | [sensor-api.md](./02_API/sensor-api.md) | [influxdb.md](./03_Database/influxdb.md), [redis.md](./03_Database/redis.md) | [sensor-data](./04_sequence/sensor-data.md), [environment-control](./04_sequence/environment-control.md) |
 | Notification | WebSocket/Telegram/Discord 알림 | [notification.md](./01_Domain/notification.md) | API 없음 (RabbitMQ 기반) | 없음 | [environment-control](./04_sequence/environment-control.md), [harvest](./04_sequence/harvest.md), [sensor-error](./04_sequence/sensor-error.md) |
-| DatasourceGenerator | IoT 장치/센서 메타데이터 관리, 시뮬레이션 데이터 발행 (기존 Datasource Service 리네임) | [datasource-generator.md](./01_Domain/datasource-generator.md) | [datasource-generator-api.md](./02_API/datasource-generator-api.md) | [datasource-generator-db.md](./03_Database/datasource-generator-db.md) | [sensor-data](./04_sequence/sensor-data.md), [sensor-error](./04_sequence/sensor-error.md) |
+| DatasourceGenerator | 데이터 소스 관리, 센서 데이터 생성/발행 (기존 Datasource Service 리네임, 센서 장치 CRUD는 Cultivation Service로 이전) | [datasource-generator.md](./01_Domain/datasource-generator.md) | [datasource-generator-api.md](./02_API/datasource-generator-api.md) | [datasource-generator-db.md](./03_Database/datasource-generator-db.md) | [sensor-data](./04_sequence/sensor-data.md) |
 
 DB 전체 그림은 [database-overview.md](./03_Database/database-overview.md)에서 한 번에 볼 수 있습니다.
 
@@ -85,7 +85,7 @@ Auth Service가 Soft Delete와 Refresh Token 삭제를 같은 트랜잭션에서
 ### 6. environment_setting은 단일 목표값이 아닌 범위(min~max)로 저장
 Rule Engine Service의 자동 제어가 값이 범위를 벗어날 때만 장치를 동작시키도록 하여, 범위 안에서 불필요하게 켜고 끄는 것(채터링)을 막기 위함입니다.
 
-- API(재배 생성 AI 추천, 환경 설정 저장 `PATCH /cultivations/{id}/environment`)는 그대로 단일 목표값을 주고받습니다.
+- 환경 설정 저장 API(`PATCH /cultivations/{id}/environment`)는 그대로 단일 목표값을 주고받습니다. (재배 생성 시 보여주는 추천값은 이후 결정 사항 9번에서 범위 형태로 바뀌었습니다.)
 - Cultivation Service가 저장 시점에 단일 목표값에 허용 오차를 적용해 범위로 변환합니다. (예: 온도 22℃ ± 1.5℃ → temp_min 20.5 / temp_max 23.5)
 - 컬럼명은 `temp_min`/`temp_max`, `humidity_min`/`humidity_max`, `co2_min`/`co2_max`, `light_min`/`light_max`입니다.
 - Rule Engine Service는 현재 센서값이 이 범위를 벗어날 때만 장치를 제어합니다. (자세한 내용은 [cultivation-db.md](./03_Database/cultivation-db.md), [rule-Engine.md](./01_Domain/rule-Engine.md) 참고)
@@ -120,11 +120,23 @@ Search/LLM을 거쳐도 항상 같은 값이 나오는 문제가 있었습니다
 - **`mushroom_reference`(최적 범위)와 `environment_setting`(위험 한계값)은 서로 다른 개념입니다.** 전자는 "이 조건이면 잘 자란다"는 참고용 추천 데이터이고, 후자는 사용자가 직접 정하는 자동 제어 기준값입니다. Rule Engine Service는 지금까지와 동일하게 `environment_setting`(및 그 Redis 캐시)만 사용하며, `mushroom_reference`를 직접 참조하지 않습니다.
 - AI Service는 더 이상 "환경 추천" 책임을 갖지 않습니다. (생육 분석/챗봇/리포트는 그대로 유지) Embedding Service/Elasticsearch는 AI 챗봇의 선택적 유사 사례 검색 용도로만 남아있습니다. (자세한 내용은 [cultivation-db.md](./03_Database/cultivation-db.md), [cultivation.md](./01_Domain/cultivation.md), [ai.md](./01_Domain/ai.md) 참고)
 
+### 10. 센서 "장치" CRUD는 DatasourceGenerator가 아닌 Cultivation Service가 담당한다
+센서 장치의 등록/조회/삭제를 원래 DatasourceGenerator가 담당했지만, 센서가 항상 특정 재배에
+종속되는 정보이고 DatasourceGenerator는 데이터 생성/발행 역할에 집중하는 것이 책임 경계가
+명확하다고 판단해 Cultivation Service로 옮겼습니다. (측정값 저장/조회는 여전히 Sensor Service,
+값 검증/자동제어는 여전히 Rule Engine Service입니다 — 이번에 옮긴 것은 오직 센서 "장치" 메타데이터입니다.)
+
+- `sensor` 테이블이 DatasourceGenerator DB → Cultivation DB로 이전되었습니다. `cultivation_id`는 이제 같은 DB 내 실제 FK입니다.
+- API 경로도 `POST/GET/DELETE /api/v1/sensors` → `POST/GET/DELETE /api/v1/cultivations/{id}/sensors`로 이동했습니다.
+- DatasourceGenerator는 센서를 직접 소유하지 않는 대신, Cultivation Service가 발행하는 `SensorRegisteredEvent`/`SensorDeletedEvent`를 구독해 "어떤 센서에 대해 데이터를 생성/발행할지"만 판단하는 읽기 전용 캐시(`sensor_cache`)를 자체 DB에 둡니다. (이벤트 기반 동기화 — OpenFeign 동기 호출 방식은 채택하지 않았습니다.)
+- 센서 상태(ONLINE/OFFLINE/ERROR) 갱신용 `SensorErrorEvent`(Rule Engine Service 발행)의 구독 주체도 DatasourceGenerator에서 Cultivation Service로 함께 이전했습니다.
+- 이 변경으로 아래 "열려있는 이슈"에 있던 `/api/v1/sensors` 경로 충돌이 자연스럽게 해소되었습니다. (자세한 내용은 [cultivation-db.md](./03_Database/cultivation-db.md), [cultivation.md](./01_Domain/cultivation.md), [datasource-generator-db.md](./03_Database/datasource-generator-db.md) 참고)
+
 ---
 
-# ⚠️ 열려있는 이슈 (팀 확인 필요)
+# ✅ 해결된 이슈
 
-- **`/api/v1/sensors` 경로 충돌** — DatasourceGenerator(장치 등록)와 Sensor Service(측정값 조회)가 같은 경로 프리픽스를 쓰고 있습니다. 자세한 내용과 대안은 [datasource-generator-api.md](./02_API/datasource-generator-api.md)의 상단 안내를 참고해 팀 논의 후 확정해주세요.
+- ~~`/api/v1/sensors` 경로 충돌~~ — DatasourceGenerator(장치 등록)와 Sensor Service(측정값 조회)가 같은 경로 프리픽스를 썼던 문제였습니다. 센서 장치 CRUD가 Cultivation Service(`/api/v1/cultivations/{id}/sensors`)로 이전되며 해소되었습니다. (결정 사항 10번 참고)
 
 ---
 

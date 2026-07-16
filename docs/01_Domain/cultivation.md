@@ -5,7 +5,12 @@
 Cultivation Service는 사용자의 버섯 재배 정보를 관리하는 핵심 서비스입니다.
 
 사용자는 새로운 재배를 생성하고, 공공데이터 기반으로 추천된 재배 환경을 수정하여 저장할 수 있으며,
-재배 진행 상황과 수확 결과를 관리할 수 있습니다.
+재배 진행 상황과 수확 결과를 관리할 수 있습니다. 재배에 연결되는 센서 "장치"의 등록/조회/삭제도
+Cultivation Service가 담당합니다.
+
+> ℹ️ **변경 이력**: 센서 장치 CRUD는 원래 DatasourceGenerator가 담당했지만, 센서가 항상 특정
+> 재배에 종속되는 정보이고 DatasourceGenerator는 데이터 생성/발행 역할에 집중하는 것이 책임
+> 경계가 명확하다고 판단해 Cultivation Service로 이전했습니다.
 
 ---
 
@@ -21,6 +26,7 @@ Cultivation Service는 사용자의 버섯 재배 정보를 관리하는 핵심 
 - 재배 이력 관리
 - 생육 사진 업로드
 - 생육 사진 이력 관리
+- 센서 등록/조회/삭제
 
 ---
 
@@ -76,12 +82,12 @@ API로 주고받는 목표값은 단일값(예: 온도 22℃)이지만, Database
 - 환경 설정
 - 센서 상태
 - 생육 상태
+- 생성일
+- 수정일
 
 environment_setting에는 범위(min/max)만 저장되어 있으므로, 응답에 필요한 단일 목표값은
 저장된 범위의 중간값 `(min+max)/2`을 그때그때 계산해서 반환합니다. 허용 오차가 대칭으로
 적용되기 때문에 이 값은 사용자가 저장 시 입력했던 단일값과 정확히 일치합니다.
-- 생성일
-- 수정일
 
 ---
 
@@ -143,6 +149,26 @@ environment_setting에는 범위(min/max)만 저장되어 있으므로, 응답�
 ## 생육 사진 이력 조회
 
 재배별로 업로드된 사진 목록을 조회합니다.
+
+---
+
+## 센서 등록/조회/삭제
+
+재배에 연결되는 센서 "장치"를 관리합니다. (센서가 측정한 값 자체는 다루지 않습니다. 값 저장/조회는
+Sensor Service, 값 검증/자동제어는 Rule Engine Service의 책임입니다.)
+
+등록 정보
+
+- 센서 이름
+- 센서 종류
+- 연결할 데이터 소스(datasourceId, DatasourceGenerator DB에 대한 소프트 참조)
+
+센서를 등록/삭제하면 `SensorRegisteredEvent`/`SensorDeletedEvent`를 발행합니다.
+DatasourceGenerator가 이를 구독해 "어떤 센서에 대해 데이터를 시뮬레이션/발행할지" 판단하는 데
+사용합니다. DatasourceGenerator는 더 이상 센서 메타데이터를 직접 소유하지 않습니다.
+
+센서 상태(ONLINE/OFFLINE/ERROR/MAINTENANCE)는 사용자가 직접 수정하지 않으며, Rule Engine
+Service가 발행하는 `SensorErrorEvent`를 구독해 자동으로 갱신합니다.
 
 ---
 
@@ -224,6 +250,30 @@ GET /cultivations/{cultivationId}/analysis
 
 ---
 
+## 센서 등록
+
+POST /cultivations/{cultivationId}/sensors
+
+---
+
+## 센서 목록 조회
+
+GET /cultivations/{cultivationId}/sensors
+
+---
+
+## 센서 상세 조회
+
+GET /cultivations/{cultivationId}/sensors/{sensorId}
+
+---
+
+## 센서 삭제
+
+DELETE /cultivations/{cultivationId}/sensors/{sensorId}
+
+---
+
 # Database
 
 Cultivation Service는 별도의 PostgreSQL Database를 사용합니다.
@@ -235,6 +285,7 @@ Cultivation Service는 별도의 PostgreSQL Database를 사용합니다.
 - environment_setting
 - harvest
 - photo
+- sensor (센서 장치 메타데이터, 기존 DatasourceGenerator DB에서 이전)
 
 ---
 
@@ -341,6 +392,55 @@ environment_setting을 생성/수정(저장)할 때 발행합니다. 단일 목�
 
 ---
 
+### SensorRegisteredEvent
+
+센서를 등록할 때 발행합니다.
+
+```json
+{
+    "sensorId": 4,
+    "cultivationId": 3,
+    "datasourceId": 1,
+    "sensorType": "TEMPERATURE",
+    "registeredAt": "2026-08-15T09:00:00"
+}
+```
+
+구독 서비스: DatasourceGenerator (sensor_cache 반영, 시뮬레이션 데이터 생성 대상 목록 갱신용)
+
+---
+
+### SensorDeletedEvent
+
+센서를 삭제할 때 발행합니다.
+
+```json
+{
+    "sensorId": 4,
+    "cultivationId": 3,
+    "deletedAt": "2026-08-15T09:00:00"
+}
+```
+
+구독 서비스: DatasourceGenerator (sensor_cache에서 제거)
+
+---
+
+## 구독 이벤트
+
+### SensorErrorEvent
+
+Rule Engine Service가 센서 오류/연결 해제를 감지하면 발행합니다.
+
+구독 시 sensor 테이블의 status를 갱신합니다. (기존에는 DatasourceGenerator가 구독했지만, sensor
+테이블 소유권이 Cultivation Service로 옮겨지며 구독 주체도 함께 이전했습니다.)
+
+```
+ONLINE → OFFLINE / ERROR
+```
+
+---
+
 # Sequence
 
 ## 재배 생성
@@ -407,6 +507,34 @@ Event 발행
 
 ---
 
+## 센서 등록
+
+Client
+
+↓
+
+Gateway
+
+↓
+
+Cultivation Service
+
+↓
+
+sensor 생성 (PostgreSQL)
+
+↓
+
+RabbitMQ Publish (SensorRegisteredEvent)
+
+↓
+
+DatasourceGenerator (sensor_cache 반영)
+
+삭제도 동일한 구조로, sensor 레코드 삭제 후 SensorDeletedEvent를 발행합니다.
+
+---
+
 # 예외 상황
 
 - 존재하지 않는 재배
@@ -417,6 +545,8 @@ Event 발행
 - 사진 업로드 실패
 - 지원하지 않는 파일 형식
 - Vision 분석 실패
+- 존재하지 않는 센서
+- 센서 등록/삭제 이벤트 발행 실패 (DatasourceGenerator의 sensor_cache가 갱신되지 않아 시뮬레이션 대상 목록이 최신 상태를 반영하지 못할 수 있음)
 
 ---
 

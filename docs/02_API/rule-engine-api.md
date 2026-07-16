@@ -11,8 +11,10 @@ MQTT Subscribe와 RabbitMQ Publish만으로 동작하는 이벤트/메시지 기
 > 조회 API를 이 문서에서 함께 제공했었지만, 두 서비스를 다시 분리하면서 조회 API는
 > [sensor-api.md](./sensor-api.md)로 옮겼습니다.
 
-센서 "장치" 자체의 등록/관리는 [datasource-generator-api.md](./datasource-generator-api.md)를,
+센서 "장치" 자체의 등록/조회/삭제는 [cultivation-api.md](./cultivation-api.md)를,
 측정값 현재값/통계/차트/리포트 조회는 [sensor-api.md](./sensor-api.md)를 참고하세요.
+(DatasourceGenerator는 데이터 소스 관리와 MQTT 발행만 담당하며, 센서 장치 CRUD는 더 이상
+담당하지 않습니다. 자세한 내용은 [datasource-generator-api.md](./datasource-generator-api.md) 참고)
 
 ---
 
@@ -35,7 +37,7 @@ Publish
 ```
 EnvironmentMeasuredEvent → Sensor Service (저장용, 수신할 때마다 매번 발행)
 EnvironmentControlEvent → Notification Service (자동 제어가 발생했을 때만 발행)
-SensorErrorEvent → DatasourceGenerator, Notification Service (센서 오류 감지 시 발행)
+SensorErrorEvent → Cultivation Service (sensor.status 갱신), Notification Service (센서 오류 감지 시 발행)
 ```
 
 Subscribe

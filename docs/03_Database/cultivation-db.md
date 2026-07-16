@@ -20,6 +20,13 @@ Environment Setting이 생성됩니다. 이때 API로 주고받는 단일 목표
 > `mushroom_reference`는 사용자별 데이터가 아닌 전역 고정 시드 데이터이며, `environment_setting`
 > (사용자가 재배별로 직접 설정하는 위험 한계값)과는 별개의 테이블입니다.
 
+> ℹ️ **변경 이력**: 센서 "장치"의 등록/조회/삭제(CRUD)는 원래 DatasourceGenerator가 담당했지만,
+> 센서가 항상 특정 재배(cultivation)에 종속되는 정보이고 DatasourceGenerator는 데이터 생성/발행에만
+> 집중하는 것이 책임이 명확하다고 판단해 Cultivation Service로 옮겼습니다. 이에 따라 `sensor`
+> 테이블도 Cultivation Database로 이전했습니다. DatasourceGenerator는 더 이상 센서 메타데이터를
+> 소유하지 않으며, Cultivation Service가 발행하는 이벤트를 구독해 시뮬레이션에 필요한 최소 정보만
+> 자체 캐시(`sensor_cache`)로 보관합니다. (자세한 내용은 [datasource-generator-db.md](./datasource-generator-db.md) 참고)
+
 ---
 
 # ERD
@@ -94,6 +101,19 @@ FK  cultivation_id
     image_url
     uploaded_at
     created_at
+
+cultivation (1) ──── (N) sensor  ※ 위 체인과 별도로 cultivation에서 바로 분기
+──────────────────────────────────────────────
+PK  id
+FK  cultivation_id
+    datasource_id (소프트 참조, DatasourceGenerator DB)
+    sensor_uuid
+    sensor_type
+    name
+    status
+    installed_at
+    created_at
+    updated_at
 ```
 
 ---
@@ -200,6 +220,29 @@ Cultivation Service가 단일값을 범위로 변환해 저장합니다. 아래 
 | image_url | VARCHAR(500) |
 | uploaded_at | TIMESTAMP |
 | created_at | TIMESTAMP |
+
+---
+
+## sensor
+
+재배에 연결된 센서 장치의 메타데이터를 관리합니다. (기존 DatasourceGenerator DB에서 이전)
+
+| Column | Type | Description |
+|---------|------|-------------|
+| id | BIGSERIAL | PK |
+| cultivation_id | BIGINT | 재배 (FK, 같은 DB 내 실제 외래키) |
+| datasource_id | BIGINT | 데이터 소스 (DatasourceGenerator DB에 대한 소프트 참조, FK 제약 없음) |
+| sensor_uuid | UUID | 센서 고유 ID |
+| sensor_type | VARCHAR(30) | 센서 종류 |
+| name | VARCHAR(100) | 센서 이름 |
+| status | VARCHAR(20) | 상태 (ONLINE/OFFLINE/ERROR/MAINTENANCE) |
+| installed_at | TIMESTAMP | 설치일 |
+| created_at | TIMESTAMP | 생성일 |
+| updated_at | TIMESTAMP | 수정일 |
+
+`datasource_id`는 DatasourceGenerator DB의 `datasource` 테이블을 참조하지만, 서로 다른 서비스의
+DB이므로 DB 레벨 FK 제약은 걸지 않습니다. (`cultivation.user_id`가 Auth DB의 `users`를 참조하는
+방식과 동일한 패턴)
 
 ---
 
@@ -367,6 +410,43 @@ CREATE TABLE photo (
 
 ---
 
+## sensor
+
+```sql
+CREATE TABLE sensor (
+
+    id BIGSERIAL PRIMARY KEY,
+
+    cultivation_id BIGINT NOT NULL,
+
+    datasource_id BIGINT NOT NULL,
+
+    sensor_uuid UUID NOT NULL UNIQUE,
+
+    sensor_type VARCHAR(30) NOT NULL,
+
+    name VARCHAR(100) NOT NULL,
+
+    status VARCHAR(20) NOT NULL DEFAULT 'ONLINE',
+
+    installed_at TIMESTAMP,
+
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_sensor_cultivation
+        FOREIGN KEY (cultivation_id)
+        REFERENCES cultivation(id)
+        ON DELETE CASCADE
+
+);
+```
+
+`datasource_id`는 DatasourceGenerator DB를 참조하는 소프트 참조이므로 DB 레벨 FK 제약을 걸지 않습니다.
+
+---
+
 # Index
 
 ## cultivation
@@ -417,13 +497,48 @@ ON photo(uploaded_at);
 
 ---
 
+## sensor
+
+```sql
+CREATE UNIQUE INDEX uk_sensor_uuid
+ON sensor(sensor_uuid);
+```
+
+```sql
+CREATE INDEX idx_sensor_cultivation
+ON sensor(cultivation_id);
+```
+
+```sql
+CREATE INDEX idx_sensor_status
+ON sensor(status);
+```
+
+---
+
 # 상태(Status)
+
+## cultivation
 
 | 값 | 설명 |
 |-----|------|
 | CREATED | 생성 완료 |
 | RUNNING | 재배 중 |
 | FINISHED | 재배 종료 |
+
+---
+
+## sensor
+
+| 값 | 설명 |
+|-----|------|
+| ONLINE | 정상 |
+| OFFLINE | 연결 끊김 |
+| ERROR | 오류 |
+| MAINTENANCE | 점검 중 |
+
+sensor.status는 Rule Engine Service가 발행하는 SensorErrorEvent를 Cultivation Service가 구독해 갱신합니다.
+(기존에는 DatasourceGenerator가 이 이벤트를 구독했지만, sensor 테이블 이전과 함께 구독 주체도 옮겨졌습니다.)
 
 ---
 
@@ -525,6 +640,32 @@ Harvest 생성
 
 ---
 
+## ④ 센서 등록/삭제
+
+사용자가
+
+- 센서 이름
+- 센서 종류
+- 연결할 데이터 소스(datasourceId)
+
+를 입력해 재배에 센서를 등록합니다.
+
+↓
+
+sensor 생성 (cultivation_id는 실제 FK, datasource_id는 소프트 참조)
+
+↓
+
+RabbitMQ Publish (SensorRegisteredEvent)
+
+↓
+
+DatasourceGenerator가 구독하여 자체 sensor_cache에 반영 (시뮬레이션 데이터 생성 대상 목록)
+
+삭제 시에는 sensor 레코드를 삭제하고 SensorDeletedEvent를 발행해 동일하게 반영합니다.
+
+---
+
 # 관계
 
 ```
@@ -549,6 +690,12 @@ Harvest
 ↓
 
 Photo (RUNNING 기간 중 언제든 업로드 가능)
+
+
+Cultivation ── (1:N) ── Sensor ── (소프트 참조) ── DatasourceGenerator.datasource
+
+Sensor 등록/삭제 이벤트는 DatasourceGenerator(sensor_cache)로,
+SensorErrorEvent(Rule Engine Service 발행)는 Cultivation Service(sensor.status)로 전달됩니다.
 ```
 
 ---
@@ -564,7 +711,8 @@ Photo (RUNNING 기간 중 언제든 업로드 가능)
 - 반대로 조회 시 단일값이 필요하면 저장된 범위의 중간값 `(min+max)/2`를 계산합니다. 허용 오차가 대칭이므로 이 값은 사용자가 원래 입력했던 단일값과 정확히 일치하며, 별도 컬럼에 원본값을 중복 저장하지 않습니다.
 - Environment Setting은 Cultivation당 하나만 존재합니다.
 - Harvest는 재배 종료 후에만 생성됩니다.
-- Sensor 데이터는 InfluxDB에서 관리하며 PostgreSQL에는 저장하지 않습니다.
+- 센서 "장치" 메타데이터(sensor 테이블)는 Cultivation DB(PostgreSQL)에 저장하지만, 센서가 측정한 "값"(시계열)은 Sensor Service의 InfluxDB에서 관리하며 이 DB에는 저장하지 않습니다. 두 "sensor"는 서로 다른 데이터입니다.
+- sensor.cultivation_id는 같은 DB 내 실제 FK이지만, sensor.datasource_id는 DatasourceGenerator DB에 대한 소프트 참조(FK 제약 없음)입니다.
 - 사진 원본 파일은 PostgreSQL이 아닌 MinIO에 저장하고, image_url만 저장합니다.
 - 사진은 카메라 센서가 아닌 사용자가 직접 촬영하여 업로드합니다.
 - 하나의 재배(cultivation)에는 여러 장의 photo가 누적될 수 있습니다.

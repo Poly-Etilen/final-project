@@ -42,6 +42,7 @@
 - environment_setting
 - harvest
 - photo
+- sensor (센서 장치 메타데이터, 기존 DatasourceGenerator DB에서 이전)
 
 ---
 
@@ -49,12 +50,13 @@
 
 ### 목적
 
-센서 및 데이터 소스를 관리합니다. (기존 명칭: Datasource DB)
+데이터 소스를 관리하고, 센서 데이터 생성/발행에 필요한 최소 정보를 캐시로 보관합니다.
+(기존 명칭: Datasource DB)
 
 ### Table
 
 - datasource
-- sensor
+- sensor_cache (Cultivation DB의 sensor를 이벤트로 반영한 읽기 전용 캐시, source of truth 아님)
 
 ---
 
@@ -296,3 +298,29 @@ Redis 저장 (cultivation:{cultivationId}:range, write-through)
 
 캐시가 없을 때(TTL 만료, 재시작 직후 등)만 Rule Engine Service가 Cultivation Service를
 OpenFeign으로 직접 호출해 값을 채웁니다.
+
+---
+
+# 센서 등록 캐시 동기화 흐름
+
+Cultivation Service
+
+↓
+
+sensor 생성/삭제 (PostgreSQL)
+
+↓
+
+RabbitMQ (SensorRegisteredEvent / SensorDeletedEvent)
+
+↓
+
+DatasourceGenerator
+
+↓
+
+PostgreSQL 저장 (sensor_cache Upsert/삭제)
+
+센서 장치 CRUD의 원본(source of truth)은 Cultivation DB의 `sensor`입니다. DatasourceGenerator의
+`sensor_cache`는 "어떤 센서에 대해 MQTT 데이터를 생성/발행할지" 판단하기 위한 읽기 전용
+캐시일 뿐이며, 이벤트로만 갱신됩니다.
