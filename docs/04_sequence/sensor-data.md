@@ -123,7 +123,7 @@ EnvironmentMeasuredEvent를 발행합니다.
 ```json
 {
     "cultivationId":3,
-    "sensorId":1,
+    "deviceEui":1,
     "temperature":22.4,
     "humidity":91.5,
     "co2":810,
@@ -193,7 +193,7 @@ environment
 Tag
 
 - cultivationId
-- sensorId
+- deviceEui
 
 Field
 

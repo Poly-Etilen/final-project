@@ -38,13 +38,13 @@ API Gateway를 포함해 9개 서비스로 구성됩니다. (기존 9개 서비�
 |--------|-----------|--------|-----|----------|----------------|
 | API Gateway | 라우팅, 인증 토큰 검증 | - | - | - | 전체 시퀀스 최초 진입점 |
 | Auth | 인증/인가, JWT, 이메일 인증, 회원 프로필/탈퇴/재배 통계 (기존 Auth+User 통합) | [auth.md](./01_Domain/auth.md) | [auth-api.md](./02_API/auth-api.md) | [auth-db.md](./03_Database/auth-db.md) | [signup](./04_sequence/signup.md), [login](./04_sequence/login.md), [withdraw](./04_sequence/withdraw.md) |
-| Cultivation | 재배 생성/관리/수확/사진 업로드, 공공데이터 기반 환경 추천(`mushroom_reference` 조회), 센서 장치 등록/조회/삭제 | [cultivation.md](./01_Domain/cultivation.md) | [cultivation-api.md](./02_API/cultivation-api.md) | [cultivation-db.md](./03_Database/cultivation-db.md) | [create-cultivation](./04_sequence/create-cultivation.md), [harvest](./04_sequence/harvest.md), [growth-analysis](./04_sequence/growth-analysis.md), [sensor-error](./04_sequence/sensor-error.md) |
-| AI | 생육 분석(Vision), 챗봇, 리포트 | [ai.md](./01_Domain/ai.md) | [ai-api.md](./02_API/ai-api.md) | Redis(캐시), MinIO(읽기 전용) | [growth-analysis](./04_sequence/growth-analysis.md), [harvest](./04_sequence/harvest.md), [ai-chat](./04_sequence/ai-chat.md), [ai-report](./04_sequence/ai-report.md) |
+| Cultivation | 재배 생성/관리/수확/사진 업로드, 공공데이터 기반 환경 추천(`mushroom_reference` 조회), 센서 장치 등록/조회/삭제(재배 생성과 동시 등록 가능) | [cultivation.md](./01_Domain/cultivation.md) | [cultivation-api.md](./02_API/cultivation-api.md) | [cultivation-db.md](./03_Database/cultivation-db.md) | [create-cultivation](./04_sequence/create-cultivation.md), [harvest](./04_sequence/harvest.md), [growth-analysis](./04_sequence/growth-analysis.md), [sensor-error](./04_sequence/sensor-error.md) |
+| AI | 생육 분석(Vision), 챗봇, 리포트, 버섯 가이드(효능/주의사항) | [ai.md](./01_Domain/ai.md) | [ai-api.md](./02_API/ai-api.md) | Redis(캐시), MinIO(읽기 전용) | [create-cultivation](./04_sequence/create-cultivation.md), [growth-analysis](./04_sequence/growth-analysis.md), [harvest](./04_sequence/harvest.md), [ai-chat](./04_sequence/ai-chat.md), [ai-report](./04_sequence/ai-report.md) |
 | Embedding | 재배 참조 데이터 임베딩·벡터 검색 (AI 챗봇 유사 사례 검색용) | [embedding.md](./01_Domain/embedding.md) | [embedding-api.md](./02_API/embedding-api.md) | [elasticSearch.md](./03_Database/elasticSearch.md) | [ai-chat](./04_sequence/ai-chat.md) |
 | Rule Engine | MQTT 수신(Collector), 검증, 규칙 평가/자동 제어, 센서 오류 감지 | [rule-Engine.md](./01_Domain/rule-Engine.md) | API 없음 (MQTT/RabbitMQ 기반, [rule-engine-api.md](./02_API/rule-engine-api.md) 참고) | Redis(목표 환경 범위 캐시만, 영구 저장소 없음) | [sensor-data](./04_sequence/sensor-data.md), [environment-control](./04_sequence/environment-control.md), [sensor-error](./04_sequence/sensor-error.md) |
 | Sensor | 측정값 저장(Redis/InfluxDB)·조회·통계·주간월간 리포트 집계 | [sensor.md](./01_Domain/sensor.md) | [sensor-api.md](./02_API/sensor-api.md) | [influxdb.md](./03_Database/influxdb.md), [redis.md](./03_Database/redis.md) | [sensor-data](./04_sequence/sensor-data.md), [environment-control](./04_sequence/environment-control.md) |
 | Notification | WebSocket/Telegram/Discord 알림 | [notification.md](./01_Domain/notification.md) | API 없음 (RabbitMQ 기반) | 없음 | [environment-control](./04_sequence/environment-control.md), [harvest](./04_sequence/harvest.md), [sensor-error](./04_sequence/sensor-error.md) |
-| DatasourceGenerator | 데이터 소스 관리, 센서 데이터 생성/발행 (기존 Datasource Service 리네임, 센서 장치 CRUD는 Cultivation Service로 이전) | [datasource-generator.md](./01_Domain/datasource-generator.md) | [datasource-generator-api.md](./02_API/datasource-generator-api.md) | [datasource-generator-db.md](./03_Database/datasource-generator-db.md) | [sensor-data](./04_sequence/sensor-data.md) |
+| DatasourceGenerator | 센서 데이터 생성/발행 (MQTT Publish 전용, REST API 없음, 기존 Datasource Service 리네임) | [datasource-generator.md](./01_Domain/datasource-generator.md) | API 없음 ([datasource-generator-api.md](./02_API/datasource-generator-api.md) 참고) | DB 없음, 메모리 캐시만 사용 ([datasource-generator-db.md](./03_Database/datasource-generator-db.md) 참고) | [sensor-data](./04_sequence/sensor-data.md) |
 
 DB 전체 그림은 [database-overview.md](./03_Database/database-overview.md)에서 한 번에 볼 수 있습니다.
 
@@ -128,9 +128,55 @@ Search/LLM을 거쳐도 항상 같은 값이 나오는 문제가 있었습니다
 
 - `sensor` 테이블이 DatasourceGenerator DB → Cultivation DB로 이전되었습니다. `cultivation_id`는 이제 같은 DB 내 실제 FK입니다.
 - API 경로도 `POST/GET/DELETE /api/v1/sensors` → `POST/GET/DELETE /api/v1/cultivations/{id}/sensors`로 이동했습니다.
-- DatasourceGenerator는 센서를 직접 소유하지 않는 대신, Cultivation Service가 발행하는 `SensorRegisteredEvent`/`SensorDeletedEvent`를 구독해 "어떤 센서에 대해 데이터를 생성/발행할지"만 판단하는 읽기 전용 캐시(`sensor_cache`)를 자체 DB에 둡니다. (이벤트 기반 동기화 — OpenFeign 동기 호출 방식은 채택하지 않았습니다.)
+- DatasourceGenerator는 센서를 직접 소유하지 않는 대신, Cultivation Service가 발행하는 `SensorRegisteredEvent`/`SensorDeletedEvent`를 구독해 "어떤 센서에 대해 데이터를 생성/발행할지"만 판단하는 읽기 전용 캐시(`sensor_cache`)를 둡니다. (이벤트 기반 동기화 — OpenFeign 동기 호출 방식은 채택하지 않았습니다. 단, 이 캐시를 어디에 저장할지는 이후 결정 사항 12번에서 DB에서 메모리로 바뀌었습니다.)
 - 센서 상태(ONLINE/OFFLINE/ERROR) 갱신용 `SensorErrorEvent`(Rule Engine Service 발행)의 구독 주체도 DatasourceGenerator에서 Cultivation Service로 함께 이전했습니다.
 - 이 변경으로 아래 "열려있는 이슈"에 있던 `/api/v1/sensors` 경로 충돌이 자연스럽게 해소되었습니다. (자세한 내용은 [cultivation-db.md](./03_Database/cultivation-db.md), [cultivation.md](./01_Domain/cultivation.md), [datasource-generator-db.md](./03_Database/datasource-generator-db.md) 참고)
+
+### 11. 센서 등록 정보를 `device_eui` 기반으로 전면 재설계하고, "데이터 소스" 개념을 제거했다
+
+실제 하드웨어 식별자인 `device_eui`를 기준으로 센서를 관리하는 것이 자연스럽다고 판단해, 결정 사항 10번에서 옮긴 `sensor` 테이블의 필드 구조 자체를 다시 정리했습니다.
+
+- `sensor` 테이블의 PK가 자동 생성 `id`(BIGSERIAL)에서 사용자가 등록 시 직접 입력하는 `device_eui`(INT)로 바뀌었습니다.
+- 센서 등록 시 입력 필드가 `device_eui`, `place`, `location`, `device_model`, `sensor_type`으로 정리되었습니다. 기존의 `sensor_uuid`, `name`, `installed_at`, `datasource_id` 컬럼은 제거되었습니다.
+- 위치 정보(`place`/`location`)가 센서 레코드에 직접 저장되면서, 별도로 위치를 그룹핑하던 **"데이터 소스"(datasource) 엔티티 자체가 필요 없어져 완전히 제거**되었습니다. DatasourceGenerator DB의 `datasource` 테이블과 그 REST API(`/api/v1/datasources`)가 모두 삭제되었고, 그 결과 DatasourceGenerator는 REST API를 전혀 제공하지 않는 서비스가 되었습니다(MQTT Publish + RabbitMQ Subscribe만 수행).
+- 센서의 유일한 실질 식별자가 `device_eui`가 되면서, 등록 API뿐 아니라 **측정 파이프라인 전체**(MQTT Payload, RabbitMQ의 `EnvironmentMeasuredEvent`/`SensorErrorEvent`, InfluxDB Tag)에서 기존에 쓰던 범용 필드명 `sensorId`를 `deviceEui`로 통일했습니다. (컬럼명은 DB에서는 `device_eui`(snake_case), JSON payload에서는 `deviceEui`(camelCase)를 사용하는 기존 컨벤션을 그대로 따릅니다.)
+- API 경로 파라미터도 `{sensorId}` → `{deviceEui}`로 바뀌었습니다. (예: `DELETE /api/v1/cultivations/{id}/sensors/{deviceEui}`)
+- (자세한 내용은 [cultivation-db.md](./03_Database/cultivation-db.md), [cultivation.md](./01_Domain/cultivation.md), [cultivation-api.md](./02_API/cultivation-api.md), [datasource-generator.md](./01_Domain/datasource-generator.md), [datasource-generator-api.md](./02_API/datasource-generator-api.md), [datasource-generator-db.md](./03_Database/datasource-generator-db.md) 참고)
+
+### 12. DatasourceGenerator의 `sensor_cache`를 PostgreSQL 대신 메모리(In-Memory)로 전환했다
+
+결정 사항 10~11번을 거치며 DatasourceGenerator DB에는 `sensor_cache` 테이블 하나만 남았는데,
+device_eui/cultivationId/sensorType 세 컬럼만 갖고 조인·트랜잭션이 전혀 없는 단순 조회용
+캐시였습니다. 이런 용도로 별도 PostgreSQL 인스턴스(스키마)를 유지하는 것이 과하다고 판단해
+DB 자체를 없앴습니다.
+
+- `sensor_cache`는 이제 PostgreSQL 테이블이 아니라 서비스 메모리(In-Memory, 예: ConcurrentHashMap)에서만 관리됩니다. 이로써 DatasourceGenerator는 어떤 영구 저장소도 갖지 않는 서비스가 되었습니다(REST API도 결정 사항 11번에서 이미 없어졌으므로, MQTT Publish + RabbitMQ Subscribe만 남습니다).
+- 평상시 갱신 방식(`SensorRegisteredEvent`/`SensorDeletedEvent` 구독)은 그대로지만, 메모리 캐시는 서비스 재시작 시 비게 되는 문제가 새로 생겼습니다. 이를 해결하기 위해 **서비스 시작 시점에 한해** Cultivation Service의 신규 엔드포인트 `GET /api/v1/sensors`(전체 재배의 센서 목록, 내부용)를 OpenFeign으로 호출해 캐시를 일괄 재구성합니다.
+- 이벤트 유실(RabbitMQ 장애 등)에 대한 주기적 재동기화(reconciliation) 배치는 아직 없으며, 현재는 서비스 재시작 시의 전체 재조회만으로 복구합니다. (추후 개발 예정)
+- (자세한 내용은 [datasource-generator-db.md](./03_Database/datasource-generator-db.md), [datasource-generator.md](./01_Domain/datasource-generator.md), [datasource-generator-api.md](./02_API/datasource-generator-api.md), [cultivation-api.md](./02_API/cultivation-api.md)의 "센서 전체 목록 조회 (내부용)" 참고)
+
+### 13. 재배 생성 시 센서 장치를 함께 등록할 수 있게 됐고, AI Service에 "버섯 가이드" 기능이 추가됐다
+
+실제 사용자 흐름을 구체화하면서(재배 생성 → 등록할 디바이스 선택 → 버섯 효능/주의사항
+확인 → 환경 설정 → 위험값 초과 시 자동 제어) 두 가지를 반영했습니다.
+
+- `POST /cultivations` 요청에 `devices`(선택)를 추가해, 재배 생성과 초기 센서 등록을 한 트랜잭션으로 처리할 수 있게 했습니다. 이후 개별적으로 센서를 추가/삭제하는 기존 `POST/DELETE /cultivations/{id}/sensors` API도 그대로 유지됩니다. `devices`에 이미 등록된 device_eui가 섞여 있으면 재배 생성 자체가 롤백됩니다.
+- AI Service에 "버섯 가이드"(효능/재배 시 주의사항을 LLM으로 생성) 기능이 추가되었습니다. `POST /ai/mushroom-guide`를 Client가 재배 생성 직후 AI Service에 직접 호출합니다(Cultivation Service를 거치지 않음).
+- 환경 추천(mushroom_reference 조회)을 AI에서 뺐던 이유(5종 고정이라 항상 같은 값)와 동일한 문제가 있지만, 이번엔 "수치"가 아닌 "설명 문서"를 만드는 것이라 LLM 활용이 여전히 유효하다고 판단했습니다. 대신 반복 호출을 피하기 위해 `cultivationId`가 아닌 `mushroomType` 기준으로 캐싱합니다(`ai:mushroom:{mushroomType}:guide`, TTL 7일).
+- `mushroom_reference.description`(재배 생성 응답에 포함되는 짧은 한 줄 문구)과 버섯 가이드(효능/주의사항, 별도 API로 조회하는 긴 설명)는 서로 다른 콘텐츠입니다.
+- (자세한 내용은 [cultivation-api.md](./02_API/cultivation-api.md), [cultivation.md](./01_Domain/cultivation.md), [ai.md](./01_Domain/ai.md), [ai-api.md](./02_API/ai-api.md), [create-cultivation.md](./04_sequence/create-cultivation.md), [redis.md](./03_Database/redis.md) 참고)
+
+### 14. Rule Engine Service의 자동 제어 정지 기준을 "범위 경계"가 아닌 "중앙값"으로 명확히 했다
+
+기존에도 목표 환경을 범위(min~max)로 저장해 채터링을 줄이고 있었지만, 제어를 멈추는 시점이
+"범위 안으로 복귀하는 즉시"였기 때문에 경계 부근에서 값이 미세하게 오르내리면 여전히 반복
+On/Off가 발생할 수 있었습니다. 이를 보완했습니다.
+
+- 제어를 **시작**하는 기준은 그대로 범위 경계(min/max)입니다.
+- 제어를 **멈추는** 기준은 범위 경계가 아니라 범위의 중앙값(mid = (min+max)/2)입니다. 즉, 장치가 한 번 켜지면 값이 범위 안으로 돌아온 뒤에도 중앙값에 도달할 때까지 계속 동작합니다.
+- 이 중앙값은 사용자가 환경 설정 저장 시 입력했던 단일 목표값과 정확히 같습니다(허용 오차가 대칭이므로).
+- 이 제어를 구현하려면 Rule Engine Service가 재배별/장치별 현재 ON/OFF 상태를 추적해야 하는데, 구체적인 저장 방식(Redis 키 설계 등)은 아직 확정하지 않았고 추후 개발 예정으로 남겨뒀습니다.
+- (자세한 내용은 [rule-Engine.md](./01_Domain/rule-Engine.md), [environment-control.md](./04_sequence/environment-control.md) 참고)
 
 ---
 

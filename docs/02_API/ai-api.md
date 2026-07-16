@@ -23,6 +23,12 @@ Bearer JWT
 > Service가 자체 참조 테이블(`mushroom_reference`)을 직접 조회하는 방식으로 이전했습니다.
 > 자세한 내용은 [cultivation-api.md](./cultivation-api.md)의 "재배 생성" 참고.
 
+> ℹ️ **변경 이력**: `POST /mushroom-guide`가 새로 추가되었습니다. 재배 생성 직후 버섯의
+> 효능/재배 주의사항을 자연어로 보여주는 기능으로, Client가 재배 생성 응답을 받은 뒤 이
+> 엔드포인트를 직접 호출합니다(Cultivation Service를 거치지 않음). 환경 추천과 달리 이 기능은
+> "설명 문서 생성"이 목적이라 LLM을 그대로 사용하되, `mushroomType`(5종 고정) 기준으로
+> 캐싱해 동일 종류에 대한 반복 호출을 피합니다.
+
 ---
 
 # 생육 분석 (Vision)
@@ -88,6 +94,54 @@ LLM (결과 해석 및 개선 방안 생성)
 
 Vision 모델이 산출한 지표(growthScore, myceliumGrowthRate, capSize, colorStatus, diseaseStatus, growthStage, expectedHarvestDate)는
 결정론적으로 계산되며, LLM은 improvement(해석/개선 방안)만 생성합니다.
+
+---
+
+# 버섯 가이드
+
+## POST /mushroom-guide
+
+재배 생성 직후, 선택한 버섯 종류의 효능/재배 시 주의사항을 자연어로 생성합니다. Client가
+재배 생성 응답(`cultivationId`, `recommendedEnvironment`)을 받은 뒤 바로 호출하는 것을
+가정하지만, `cultivationId`는 필요하지 않습니다(버섯 종류에만 의존).
+
+### Request
+
+```json
+{
+    "mushroomType": "OYSTER"
+}
+```
+
+---
+
+### Process
+
+AI Service
+
+↓
+
+Redis 캐시 조회 (ai:mushroom:{mushroomType}:guide)
+
+↓
+
+Cache Miss 시 LLM 호출 (효능/주의사항 생성) → Redis에 캐시 저장 (TTL 7일)
+
+---
+
+### Response
+
+```json
+{
+    "mushroomType": "OYSTER",
+    "benefits": "느타리버섯은 식이섬유와 베타글루칸이 풍부해 면역력 강화에 도움을 줍니다.",
+    "precautions": "다습한 환경을 선호하지만 환기가 부족하면 곰팡이가 발생하기 쉬우니 CO₂ 농도 관리에 유의하세요."
+}
+```
+
+버섯 종류가 5가지로 고정되어 있어 같은 `mushroomType`이면 항상 같은 응답이 캐시에서
+반환됩니다. `mushroom_reference.description`(짧은 한 줄 참고 문구, 재배 생성 응답에 포함)과는
+별개의 콘텐츠입니다.
 
 ---
 
@@ -195,6 +249,7 @@ LLM
 | AI005 | 등록된 사진 없음 |
 | AI006 | Vision 모델 분석 실패 |
 | AI007 | API 호출 시간 초과 |
+| AI008 | 버섯 가이드 생성 실패 (LLM 응답 실패 포함) |
 
 ---
 
@@ -211,7 +266,7 @@ Sensor Service (센서 데이터/통계 조회)
 
 ```
 Cultivation Service (생육 사진 Vision 분석 요청)
-API Gateway (AI 챗봇 요청)
+API Gateway (AI 챗봇 요청, 버섯 가이드 요청)
 ```
 
 ---
@@ -223,6 +278,7 @@ API Gateway (AI 챗봇 요청)
 - AI 생육 분석 결과 (ai:{cultivationId}:analysis, TTL 6시간)
 - AI 챗봇 응답 (ai:{hash}, TTL 24시간)
 - AI 리포트 (report:{cultivationId}:{period}, TTL 24시간)
+- 버섯 가이드 (ai:mushroom:{mushroomType}:guide, TTL 7일) — cultivationId가 아닌 mushroomType 기준으로 캐싱됩니다.
 
 ---
 

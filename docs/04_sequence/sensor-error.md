@@ -102,7 +102,7 @@ Rule Engine Service는 Scheduler를 통해
 
 ```json
 {
-    "sensorId":1,
+    "deviceEui":1,
     "temperature":-999,
     "humidity":91
 }
@@ -141,7 +141,7 @@ SensorErrorEvent를 발행합니다.
 ```json
 {
     "cultivationId":3,
-    "sensorId":1,
+    "deviceEui":1,
     "status":"OFFLINE",
     "reason":"60초 이상 데이터 미수신",
     "detectedAt":"2026-08-15T12:31:10"

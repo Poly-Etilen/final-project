@@ -193,6 +193,43 @@ TTL
 
 ---
 
+## 버섯 가이드 Cache
+
+버섯 종류(공공데이터 기준 5가지 고정)별 효능/재배 주의사항은 항상 같은 내용이므로,
+재배(cultivationId)가 아닌 mushroomType 기준으로 캐싱해 반복 LLM 호출을 피합니다.
+
+Key
+
+```
+ai:mushroom:{mushroomType}:guide
+```
+
+Example
+
+```
+ai:mushroom:OYSTER:guide
+```
+
+Value
+
+```json
+{
+  "benefits": "...",
+  "precautions": "..."
+}
+```
+
+TTL
+
+```
+7일
+```
+
+다른 AI 캐시보다 TTL이 긴 이유는, 이 값이 특정 재배가 아니라 버섯 종류 자체에 대한 고정적인
+설명이라 자주 바뀔 필요가 없기 때문입니다.
+
+---
+
 # Rule Engine
 
 ## 목표 환경 범위 캐시
@@ -302,6 +339,7 @@ Redis는 항상 갱신하지만, InfluxDB는 재배별 10초 간격으로 스로
 - AI 챗봇 응답 (ai:{hash}, TTL 24시간)
 - AI 생육 분석 결과 (ai:{cultivationId}:analysis, TTL 6시간)
 - AI 리포트 (report:{cultivationId}:{period}, TTL 24시간)
+- 버섯 가이드 (ai:mushroom:{mushroomType}:guide, TTL 7일)
 
 ---
 
@@ -467,6 +505,7 @@ TTL을 사용하는 데이터
 - AI 챗봇 응답 캐시 (24시간)
 - AI 생육 분석 결과 캐시 (6시간)
 - AI 리포트 캐시 (24시간)
+- 버섯 가이드 캐시 (7일)
 - 목표 환경 범위 캐시 (Rule Engine Service, 24시간)
 
 TTL을 사용하지 않는 데이터

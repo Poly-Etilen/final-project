@@ -11,6 +11,13 @@ AI Service는 LLM과 RAG(Retrieval-Augmented Generation)를 활용하여 사용�
 > AI가 불필요하다고 판단해 Cultivation Service의 `mushroom_reference` 참조 테이블 조회로
 > 이전했습니다. AI Service는 더 이상 환경 추천을 담당하지 않습니다.
 
+> ℹ️ **변경 이력**: 재배 생성 직후 사용자에게 버섯 효능/재배 시 주의사항을 자연어로 보여주는
+> "버섯 가이드" 기능이 추가되었습니다. 환경 추천(수치, 범위)과 달리 이 기능은 사람이 읽기 좋은
+> 설명 문서를 생성하는 것이 목적이라 LLM을 그대로 활용하기로 했습니다. 다만 버섯 종류가
+> 5가지로 고정되어 있는 것은 환경 추천 때와 동일하므로, 재배(cultivation)가 아닌
+> **버섯 종류(mushroomType) 기준으로 캐싱**하여 동일 종류에 대해 매번 LLM을 호출하지 않도록
+> 했습니다.
+
 ---
 
 # 책임
@@ -18,6 +25,7 @@ AI Service는 LLM과 RAG(Retrieval-Augmented Generation)를 활용하여 사용�
 - AI 생육 분석
 - AI 챗봇
 - AI 리포트 생성
+- 버섯 가이드(효능/주의사항) 생성
 - 프롬프트 관리
 - AI 응답 캐싱
 
@@ -97,6 +105,27 @@ Vision 모델은 사전에 다양한 성장 단계의 사진으로 학습되어 
 
 ---
 
+## 버섯 가이드 생성 (효능/주의사항)
+
+재배를 생성한 직후, 선택한 버섯 종류의 효능과 재배 시 주의사항을 자연어 문서로 보여줍니다.
+
+`mushroom_reference.description`(짧은 한 줄 참고 문구, Cultivation Service가 재배 생성 응답에
+그대로 포함)과는 별개입니다. 버섯 가이드는 그보다 훨씬 자세한 설명(효능, 주의사항)을 LLM으로
+생성하는 별도 기능이며, Client가 재배 생성 이후 AI Service를 직접 호출해서 받습니다
+(Cultivation Service를 거치지 않습니다).
+
+버섯 종류는 공공데이터 기준 5가지로 고정되어 있어 같은 종류라면 항상 같은 내용이 나오므로,
+`mushroomType` 기준으로 캐싱해 동일 종류에 대한 반복 LLM 호출을 피합니다. (재배 환경 추천을
+AI에서 뺀 이유와 같은 문제이지만, 이번에는 수치가 아닌 "설명 문서"를 만드는 것이라 LLM을
+그대로 사용하기로 했습니다.)
+
+### 제공 정보
+
+- 효능 (buffs)
+- 재배 시 주의사항 (precautions)
+
+---
+
 ## AI 챗봇
 
 사용자는 자연어로 재배 관련 질문을 할 수 있습니다.
@@ -134,6 +163,12 @@ POST /ai/analysis
 
 ---
 
+## 버섯 가이드 생성
+
+POST /ai/mushroom-guide
+
+---
+
 ## AI 챗봇
 
 POST /ai/chat
@@ -160,6 +195,8 @@ AI 응답 캐시를 저장합니다.
 
 - AI 분석 결과
 - AI 리포트
+- AI 챗봇 응답
+- 버섯 가이드 (mushroomType 기준, cultivationId와 무관)
 
 ---
 
@@ -198,6 +235,7 @@ AI Service는 Vision 분석을 위해 사진을 조회합니다.
 ### API Gateway
 
 - AI 챗봇 요청
+- 버섯 가이드 요청 (Client가 직접 호출, Cultivation Service를 거치지 않음)
 
 ---
 
@@ -226,6 +264,32 @@ Monthly Scheduler 기반 AI 리포트 생성이 완료되면 발행합니다.
 ---
 
 # Sequence
+
+## 버섯 가이드 생성
+
+Client (재배 생성 완료 직후)
+
+↓
+
+AI Service
+
+↓
+
+Redis 캐시 조회 (ai:mushroom:{mushroomType}:guide)
+
+↓
+
+Cache Hit → 즉시 반환
+
+↓
+
+Cache Miss → LLM 호출 (효능/주의사항 생성) → Redis 캐시 저장 (TTL 7일) → 반환
+
+↓
+
+Client
+
+---
 
 ## AI 리포트 생성
 
@@ -260,7 +324,7 @@ Client
 # 예외 상황
 
 - Embedding 검색 실패
-- LLM 응답 실패
+- LLM 응답 실패 (버섯 가이드 생성 실패 포함)
 - Redis Cache 조회 실패
 - Sensor 데이터 부족
 - 등록된 사진 없음

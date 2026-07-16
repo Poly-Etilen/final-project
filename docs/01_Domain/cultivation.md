@@ -40,8 +40,15 @@ Cultivation Service가 담당합니다.
 
 - 재배 이름
 - 버섯 종류
+- 등록할 센서 장치 목록 (선택, device_eui/place/location/device_model/sensor_type)
 
 를 입력합니다.
+
+> ℹ️ **변경 이력**: 원래 센서 장치 등록은 재배 생성과 완전히 분리된 별도 API였지만, 실제
+> 사용자는 재배를 만드는 화면에서 연결할 디바이스도 함께 선택하는 경우가 많아 재배 생성
+> 요청에 디바이스 목록을 포함할 수 있도록 확장했습니다. 재배 생성과 디바이스 등록은 하나의
+> 트랜잭션으로 처리됩니다. 디바이스는 선택 항목이며, 생략하면 이후 별도 API로 등록할 수
+> 있습니다.
 
 이후 자체 보유한 `mushroom_reference` 참조 테이블(공공데이터 기반 5종 버섯의 최적 환경 범위)을
 버섯 종류로 조회하여 추천값을 반환합니다. AI Service를 호출하지 않습니다.
@@ -159,9 +166,16 @@ Sensor Service, 값 검증/자동제어는 Rule Engine Service의 책임입니�
 
 등록 정보
 
-- 센서 이름
-- 센서 종류
-- 연결할 데이터 소스(datasourceId, DatasourceGenerator DB에 대한 소프트 참조)
+- device_eui (장치 고유 식별자, PK)
+- place (설치 장소)
+- location (세부 위치)
+- device_model (장치 모델명)
+- sensor_type (센서 종류)
+
+> ℹ️ **변경 이력**: 원래는 센서 이름 + 별도 `datasource` 엔티티(재배실 등 위치 그룹)에 대한
+> FK로 등록했지만, 사용자가 실제로 입력하는 정보(장치 고유 식별자, 설치 장소/위치, 모델명,
+> 센서 종류)를 기준으로 다시 설계했습니다. `datasource_id` 참조와 별도 `datasource` 테이블은
+> 폐지되었고, 위치 정보(place/location)를 센서 레코드에 직접 저장합니다.
 
 센서를 등록/삭제하면 `SensorRegisteredEvent`/`SensorDeletedEvent`를 발행합니다.
 DatasourceGenerator가 이를 구독해 "어떤 센서에 대해 데이터를 시뮬레이션/발행할지" 판단하는 데
@@ -264,13 +278,13 @@ GET /cultivations/{cultivationId}/sensors
 
 ## 센서 상세 조회
 
-GET /cultivations/{cultivationId}/sensors/{sensorId}
+GET /cultivations/{cultivationId}/sensors/{deviceEui}
 
 ---
 
 ## 센서 삭제
 
-DELETE /cultivations/{cultivationId}/sensors/{sensorId}
+DELETE /cultivations/{cultivationId}/sensors/{deviceEui}
 
 ---
 
@@ -345,6 +359,12 @@ API Gateway
 
 규칙 평가 시 목표 환경 범위(environment_setting의 min~max) 조회 (Rule Engine Service의 Redis 캐시가 없을 때만 호출되는 fallback)
 
+### DatasourceGenerator
+
+서비스 재시작 시 `GET /api/v1/sensors`로 전체 센서 목록을 조회합니다. DatasourceGenerator는
+sensor_cache를 메모리(In-Memory)에만 보관하므로, 재시작하면 캐시가 비게 되어 이 방식으로
+복구합니다. (평상시 센서 등록/삭제는 이벤트로만 전달되며, 이때는 호출되지 않습니다.)
+
 ---
 
 # Event
@@ -394,17 +414,20 @@ environment_setting을 생성/수정(저장)할 때 발행합니다. 단일 목�
 
 ### SensorRegisteredEvent
 
-센서를 등록할 때 발행합니다.
+센서를 등록할 때 발행합니다. 재배 생성 요청에 `devices`를 포함한 경우, 각 디바이스에 대해
+개별적으로 발행됩니다(단독 센서 등록 API를 호출했을 때와 동일한 이벤트).
 
 ```json
 {
-    "sensorId": 4,
+    "deviceEui": 4,
     "cultivationId": 3,
-    "datasourceId": 1,
     "sensorType": "TEMPERATURE",
     "registeredAt": "2026-08-15T09:00:00"
 }
 ```
+
+DatasourceGenerator의 sensor_cache는 메모리(In-Memory)에서 시뮬레이션/발행 목적으로만 쓰이므로
+place/location/deviceModel은 이벤트에 담지 않습니다(필요하면 Cultivation Service API 조회).
 
 구독 서비스: DatasourceGenerator (sensor_cache 반영, 시뮬레이션 데이터 생성 대상 목록 갱신용)
 
@@ -416,7 +439,7 @@ environment_setting을 생성/수정(저장)할 때 발행합니다. 단일 목�
 
 ```json
 {
-    "sensorId": 4,
+    "deviceEui": 4,
     "cultivationId": 3,
     "deletedAt": "2026-08-15T09:00:00"
 }
@@ -461,11 +484,23 @@ mushroom_reference 조회 (버섯 종류 기준)
 
 ↓
 
+Cultivation 생성 + devices 항목별 sensor 생성 (하나의 트랜잭션)
+
+↓
+
+디바이스가 있다면 RabbitMQ Publish (SensorRegisteredEvent, 디바이스별로)
+
+↓
+
 환경 추천 반환
 
 ↓
 
 Client
+
+↓
+
+(선택) 버섯 가이드 조회 — Client가 AI Service를 직접 호출 (자세한 내용은 [ai.md](./ai.md) 참고)
 
 ↓
 
@@ -541,6 +576,7 @@ DatasourceGenerator (sensor_cache 반영)
 - 이미 종료된 재배
 - 권한 없는 재배 접근
 - 지원하지 않는 버섯 종류 (mushroom_reference에 없음)
+- 재배 생성 시 devices에 이미 등록된 device_eui가 포함됨 (재배 생성 자체가 롤백됨)
 - 환경 설정 저장 실패
 - 사진 업로드 실패
 - 지원하지 않는 파일 형식

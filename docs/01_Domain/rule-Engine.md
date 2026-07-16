@@ -16,6 +16,13 @@ Rule Engine Service는 MQTT로 수신한 센서 데이터를 검증하고, 규�
 > 발생해 Cultivation Service에 부하가 몰리고 장애 시 자동 제어 자체가 막히는 문제가 있었습니다.
 > 이를 해결하기 위해 Redis에 목표 환경 범위를 캐싱하는 방식을 도입했습니다.
 
+> ℹ️ **변경 이력**: 자동 제어의 정지(OFF) 기준을 "범위 안으로 복귀"에서 "범위의 중앙값(mid)
+> 도달"로 명확히 했습니다. 기존에도 범위 자체가 히스테리시스 역할을 했지만, 경계를 살짝
+> 넘기자마자 바로 꺼지면 여전히 경계 부근에서 반복 On/Off가 발생할 수 있어, 정지 기준을
+> 중앙값으로 한 번 더 밀어 채터링을 줄였습니다. 이 중앙값은 환경 설정 저장 시 사용자가
+> 입력한 단일 목표값과 정확히 같습니다(허용 오차가 대칭이므로 `(min+max)/2` = 저장 시
+> 입력값). 아래 "규칙 평가 및 자동 제어" 참고.
+
 ---
 
 # 책임
@@ -74,9 +81,11 @@ Cache Miss → Cultivation Service OpenFeign 호출 → Redis에 캐시 저장 �
 
 조회한 목표 환경 범위와 현재 센서 값을 비교하여 규칙을 평가하고, 필요 시 장치를 자동으로 제어합니다.
 
-목표 환경은 단일값이 아닌 범위로 저장되어 있습니다. (예: 습도 85~95%)
-현재값이 범위 안에 있으면 아무 것도 제어하지 않고, 범위를 벗어난 경우에만 장치를 동작시킵니다.
-불필요하게 장치를 자주 켜고 끄는 것(채터링)을 막기 위한 히스테리시스 목적입니다.
+목표 환경은 단일값이 아닌 범위로 저장되어 있습니다. (예: 습도 85~95%) 제어를 **시작**하는
+기준은 이 범위의 경계(min/max)이지만, 제어를 **멈추는** 기준은 범위 경계가 아니라 범위의
+중앙값(mid = (min+max)/2)입니다. 즉, 한 번 장치가 켜지면 값이 범위 안으로 돌아온 즉시가 아니라
+중앙값에 도달할 때까지 계속 동작합니다. 범위 자체도 채터링 방지 목적이지만, 경계 부근에서
+값이 미세하게 오르내리는 경우까지 추가로 막기 위한 히스테리시스입니다.
 
 제어 대상
 
@@ -89,7 +98,7 @@ Cache Miss → Cultivation Service OpenFeign 호출 → Redis에 캐시 저장 �
 판단 규칙
 
 ```
-현재값 < min
+현재값 < min (장치 OFF 상태)
 
 ↓
 
@@ -97,7 +106,7 @@ Cache Miss → Cultivation Service OpenFeign 호출 → Redis에 캐시 저장 �
 ```
 
 ```
-현재값 > max
+현재값 > max (장치 OFF 상태)
 
 ↓
 
@@ -105,14 +114,30 @@ Cache Miss → Cultivation Service OpenFeign 호출 → Redis에 캐시 저장 �
 ```
 
 ```
-min ≤ 현재값 ≤ max
+장치가 ON 상태이고 현재값이 아직 mid에 도달하지 않음
 
 ↓
 
-제어하지 않음 (이미 켜져 있던 장치는 OFF)
+장치 계속 ON 유지 (범위 안으로 복귀했어도 mid 전이면 계속 ON)
 ```
 
-예시
+```
+장치가 ON 상태이고 현재값이 mid에 도달함
+
+↓
+
+장치 OFF
+```
+
+```
+장치가 원래 OFF 상태이고 min ≤ 현재값 ≤ max
+
+↓
+
+제어하지 않음 (그대로 OFF 유지)
+```
+
+예시 (습도, min 85% / mid 90% / max 95%)
 
 ```
 현재 습도 82% < 습도 min 85%
@@ -123,12 +148,33 @@ min ≤ 현재값 ≤ max
 ```
 
 ```
-현재 습도 90% (min 85% ~ max 95% 범위 안)
+습도가 87%까지 올라옴 (범위 안이지만 mid 90% 미달)
+
+↓
+
+가습기 계속 ON
+```
+
+```
+습도가 90%(mid)에 도달
+
+↓
+
+가습기 OFF
+```
+
+```
+현재 습도 90% (min 85% ~ max 95% 범위 안, 장치가 원래 OFF 상태)
 
 ↓
 
 제어 없음
 ```
+
+이 제어를 구현하려면 Rule Engine Service가 재배별/장치별로 "현재 제어 중인지(ON/OFF)"를
+추적할 수 있어야 합니다. 목표 환경 범위 캐시와 마찬가지로 Redis에 별도 키(예:
+`cultivation:{cultivationId}:control:{device}`)로 관리하는 방안을 고려할 수 있으며, 구체적인
+스키마는 추후 구현 단계에서 확정합니다.
 
 ---
 
@@ -235,7 +281,7 @@ sensor/+
 
 ```json
 {
-  "sensorId": 1,
+  "deviceEui": 1,
   "temperature": 22.4,
   "humidity": 88.1,
   "co2": 1050,
@@ -287,7 +333,7 @@ Cultivation Service가 environment_setting을 생성/수정할 때 발행합니�
 ```json
 {
   "cultivationId": 3,
-  "sensorId": 1,
+  "deviceEui": 1,
   "temperature": 22.4,
   "humidity": 88.1,
   "co2": 1050,
@@ -328,15 +374,18 @@ Cultivation Service가 environment_setting을 생성/수정할 때 발행합니�
 
 # 자동 제어 예시
 
-| 조건 | 제어 |
-|------|------|
-| Temperature > temp_max | 냉각팬 ON |
-| Temperature < temp_min | 히터 ON |
-| Humidity < humidity_min | 가습기 ON |
-| Humidity > humidity_max | 제습기 ON |
-| CO₂ > co2_max | 환풍기 ON |
-| Light < light_min | LED ON |
-| 모든 항목이 범위 안 | 제어 없음 |
+| 조건 | 제어 시작 | 제어 종료 |
+|------|-----------|-----------|
+| Temperature > temp_max | 냉각팬 ON | temperature가 temp_mid에 도달하면 OFF |
+| Temperature < temp_min | 히터 ON | temperature가 temp_mid에 도달하면 OFF |
+| Humidity < humidity_min | 가습기 ON | humidity가 humidity_mid에 도달하면 OFF |
+| Humidity > humidity_max | 제습기 ON | humidity가 humidity_mid에 도달하면 OFF |
+| CO₂ > co2_max | 환풍기 ON | co2가 co2_mid에 도달하면 OFF |
+| Light < light_min | LED ON | light가 light_mid에 도달하면 OFF |
+| 모든 항목이 범위 안 (장치가 원래 OFF) | 제어 없음 | - |
+
+`{항목}_mid`는 저장된 min/max의 중간값 `(min+max)/2`이며, 사용자가 환경 설정 시 입력했던
+단일 목표값과 동일합니다.
 
 ---
 
@@ -360,7 +409,7 @@ Rule Engine Service
 
 ├── 검증
 ├── 목표 환경 범위 조회 (Redis 캐시 우선, 미스 시 Cultivation Service OpenFeign fallback)
-├── 규칙 평가 → 장치 자동 제어 (범위 벗어난 경우만)
+├── 규칙 평가 → 장치 자동 제어 (범위 벗어나면 ON, 중앙값 도달하면 OFF)
 └── RabbitMQ Publish
 
 ↓
@@ -408,6 +457,7 @@ Redis 캐시 갱신 (cultivation:{cultivationId}:range)
 
 # 추후 개발 예정
 
+- 제어 상태(ON/OFF) 추적 저장소의 구체적인 스키마 확정 (Redis 키 설계 등)
 - 사용자 정의 Rule 지원
 - Rule 우선순위 설정
 - Rule 활성화/비활성화

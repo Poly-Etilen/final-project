@@ -6,7 +6,7 @@
 
 | Database | 용도 | 사용 서비스 |
 |----------|------|------------|
-| PostgreSQL | 관계형 데이터 저장 | Auth, Cultivation, DatasourceGenerator |
+| PostgreSQL | 관계형 데이터 저장 | Auth, Cultivation |
 | Redis | 캐시 및 임시 데이터 | Auth, AI, Rule Engine, Sensor |
 | InfluxDB | 시계열 센서 데이터 | Sensor |
 | Elasticsearch | Vector Search | Embedding |
@@ -46,17 +46,14 @@
 
 ---
 
-## DatasourceGenerator DB
+## DatasourceGenerator (DB 없음)
 
-### 목적
-
-데이터 소스를 관리하고, 센서 데이터 생성/발행에 필요한 최소 정보를 캐시로 보관합니다.
-(기존 명칭: Datasource DB)
-
-### Table
-
-- datasource
-- sensor_cache (Cultivation DB의 sensor를 이벤트로 반영한 읽기 전용 캐시, source of truth 아님)
+DatasourceGenerator는 별도의 PostgreSQL DB를 사용하지 않습니다. 센서 데이터 생성/발행에
+필요한 최소 정보(`sensor_cache`: device_eui/cultivationId/sensorType)는 메모리(In-Memory)에서만
+관리하며, Cultivation Service가 발행하는 이벤트(평상시) + 서비스 시작 시 OpenFeign 전체 조회로
+채워집니다. 별도 "데이터 소스" 엔티티도 없습니다. 위치 정보(place/location)는 Cultivation DB의
+`sensor` 테이블에 직접 저장되며, DatasourceGenerator는 알 필요가 없습니다. (자세한 내용은
+[datasource-generator-db.md](./datasource-generator-db.md) 참고)
 
 ---
 
@@ -112,6 +109,16 @@ report:{cultivationId}:{period}
 
 TTL 24시간
 
+---
+
+### 버섯 가이드 Cache
+
+```
+ai:mushroom:{mushroomType}:guide
+```
+
+TTL 7일. cultivationId가 아닌 mushroomType(5종 고정) 기준으로 캐싱합니다.
+
 자세한 키/값 구조는 [redis.md](./redis.md), [ai-api.md](../02_API/ai-api.md) 참고.
 
 ---
@@ -153,7 +160,7 @@ environment
 ### Tags
 
 - cultivationId
-- sensorId
+- deviceEui
 
 ### Fields
 
@@ -218,13 +225,14 @@ mushroom-photos
 | Rule Engine | X | O | X | X | X |
 | Sensor | X | O | O | X | X |
 | Notification | X | X | X | X | X |
-| DatasourceGenerator | O | X | X | X | X |
+| DatasourceGenerator | X | X | X | X | X |
 
 Auth(구 Auth+User)는 서비스 통합으로 테이블이 하나로 줄었습니다.
 Rule Engine Service는 PostgreSQL/InfluxDB 같은 영구 저장소가 없으며, Redis는 목표 환경 범위
 캐시 전용으로만 사용합니다(측정값 저장이 아님).
 Sensor Service는 Rule Engine Service가 RabbitMQ로 전달한 데이터를 Redis/InfluxDB에 저장합니다.
 (한때 Rule Engine과 Sensor를 하나로 통합했었지만, 저장·조회 책임의 크기가 달라 다시 분리했습니다.)
+DatasourceGenerator는 어떤 영구 저장소도 사용하지 않으며, `sensor_cache`는 메모리(In-Memory)에서만 관리합니다.
 
 ---
 
@@ -303,6 +311,8 @@ OpenFeign으로 직접 호출해 값을 채웁니다.
 
 # 센서 등록 캐시 동기화 흐름
 
+## 평상시 (이벤트 기반)
+
 Cultivation Service
 
 ↓
@@ -319,8 +329,23 @@ DatasourceGenerator
 
 ↓
 
-PostgreSQL 저장 (sensor_cache Upsert/삭제)
+메모리 캐시(sensor_cache) Upsert/삭제
 
 센서 장치 CRUD의 원본(source of truth)은 Cultivation DB의 `sensor`입니다. DatasourceGenerator의
 `sensor_cache`는 "어떤 센서에 대해 MQTT 데이터를 생성/발행할지" 판단하기 위한 읽기 전용
-캐시일 뿐이며, 이벤트로만 갱신됩니다.
+캐시일 뿐이며, PostgreSQL이 아닌 메모리(In-Memory)에 보관됩니다.
+
+## 서비스 시작 시 (재구성)
+
+DatasourceGenerator 시작
+
+↓
+
+Cultivation Service에 OpenFeign 호출 (`GET /api/v1/sensors`, 전체 센서 목록)
+
+↓
+
+메모리 캐시(sensor_cache) 일괄 채움
+
+메모리 캐시이므로 재시작하면 비어 있습니다. 평상시에는 이벤트로만 갱신하지만, 시작 시점에는
+전체 목록을 한 번에 받아와 복구합니다.

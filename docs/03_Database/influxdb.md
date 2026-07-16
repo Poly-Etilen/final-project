@@ -40,7 +40,7 @@ Tags는 조회 성능 향상을 위한 인덱스 역할을 합니다.
 | Tag | 설명 |
 |------|------|
 | cultivationId | 재배 ID |
-| sensorId | 센서 ID |
+| deviceEui | 센서 장치 ID |
 
 ---
 
@@ -77,7 +77,7 @@ environment
 Tag
 
 cultivationId = 3
-sensorId = 1
+deviceEui = 1
 
 Field
 

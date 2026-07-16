@@ -5,9 +5,16 @@
 센서에서 수집한 환경 데이터를 기반으로 Rule Engine Service가 목표 환경 범위와 비교하여
 자동 제어 여부를 판단합니다.
 
-목표 환경은 단일값이 아닌 범위(min~max)로 저장되어 있습니다. 현재값이 범위 안에 있으면 제어하지
-않고, 범위를 벗어난 경우에만 장치를 제어합니다. 불필요하게 장치를 자주 켜고 끄는 것(채터링)을
-막기 위한 히스테리시스 목적입니다.
+목표 환경은 단일값이 아닌 범위(min~max)로 저장되어 있습니다. 제어를 시작하는 기준은 이 범위의
+경계(min/max)이지만, 제어를 멈추는 기준은 범위 경계가 아니라 범위의 중앙값(mid =
+(min+max)/2)입니다. 즉 한 번 장치가 켜지면 값이 범위 안으로 돌아온 즉시가 아니라 중앙값에
+도달할 때까지 계속 동작합니다. 불필요하게 장치를 자주 켜고 끄는 것(채터링)을 막기 위한
+히스테리시스 목적입니다.
+
+> ℹ️ **변경 이력**: 제어 정지 기준을 "범위 안으로 복귀"에서 "범위의 중앙값 도달"로 명확히
+> 했습니다. 경계를 살짝 넘기자마자 바로 꺼지면 경계 부근에서 반복 On/Off가 발생할 수 있어
+> 정지 기준을 중앙값으로 한 단계 더 밀었습니다. (자세한 내용은
+> [rule-Engine.md](../01_Domain/rule-Engine.md) 참고)
 
 Rule Engine Service는 MQTT 수신, 검증, 규칙 평가, 자동 제어까지 담당하고, 저장은 직접 하지 않습니다.
 검증을 마친 데이터를 RabbitMQ(EnvironmentMeasuredEvent)로 발행하면 Sensor Service가 구독하여
@@ -214,7 +221,9 @@ Temperature > temp_max
 Cooling Fan ON
 ```
 
-현재값이 min ~ max 범위 안에 있으면 아무 것도 제어하지 않습니다. (이미 켜져 있던 장치는 OFF)
+장치가 원래 OFF 상태였고 현재값이 min ~ max 범위 안에 있으면 아무 것도 제어하지 않습니다.
+장치가 이미 ON 상태라면, 범위 안에 들어왔더라도 중앙값(mid = (min+max)/2)에 도달하기 전까지는
+계속 ON을 유지합니다. mid에 도달하면 그때 OFF로 전환합니다.
 
 ---
 
@@ -227,7 +236,7 @@ Rule Engine Service는 두 종류의 이벤트를 발행합니다.
 ```json
 {
     "cultivationId":3,
-    "sensorId":1,
+    "deviceEui":1,
     "temperature":20.5,
     "humidity":82,
     "co2":980,
@@ -374,15 +383,15 @@ Cultivation Service (Redis 캐시 미스 시에만 호출하는 fallback — 목
 
 # 자동 제어 예시
 
-| 조건 | 제어 |
-|------|------|
-| Temperature > temp_max | 냉각팬 ON |
-| Temperature < temp_min | 히터 ON |
-| Humidity < humidity_min | 가습기 ON |
-| Humidity > humidity_max | 제습기 ON |
-| CO₂ > co2_max | 환풍기 ON |
-| Light < light_min | LED ON |
-| 모든 항목이 범위 안 | 제어 없음 |
+| 조건 | 제어 시작 | 제어 종료 |
+|------|-----------|-----------|
+| Temperature > temp_max | 냉각팬 ON | temperature가 temp_mid 도달 시 OFF |
+| Temperature < temp_min | 히터 ON | temperature가 temp_mid 도달 시 OFF |
+| Humidity < humidity_min | 가습기 ON | humidity가 humidity_mid 도달 시 OFF |
+| Humidity > humidity_max | 제습기 ON | humidity가 humidity_mid 도달 시 OFF |
+| CO₂ > co2_max | 환풍기 ON | co2가 co2_mid 도달 시 OFF |
+| Light < light_min | LED ON | light가 light_mid 도달 시 OFF |
+| 모든 항목이 범위 안 (장치가 원래 OFF) | 제어 없음 | - |
 
 ---
 
@@ -400,7 +409,8 @@ Cultivation Service (Redis 캐시 미스 시에만 호출하는 fallback — 목
 
 # 고려 사항
 
-- 목표 환경은 단일값이 아닌 범위(min~max)로 저장되어 있어, 범위 안에서는 장치를 켜고 끄지 않습니다.
+- 목표 환경은 단일값이 아닌 범위(min~max)로 저장되어 있어, 장치가 원래 OFF 상태였다면 범위 안에서는 장치를 켜지 않습니다.
+- 장치가 이미 ON 상태라면 범위 안으로 복귀해도 즉시 끄지 않고, 범위의 중앙값(mid)에 도달할 때까지 계속 제어합니다. 이 제어를 위해서는 재배별/장치별 현재 ON/OFF 상태를 Rule Engine Service가 추적해야 합니다(구체적인 저장 방식은 추후 확정, [rule-Engine.md](../01_Domain/rule-Engine.md) 참고).
 - Rule Engine Service는 저장을 직접 하지 않고 RabbitMQ로 Sensor Service에 위임합니다.
 - Rule Engine Service와 Sensor Service는 RabbitMQ로만 연결되며 서로 직접 호출하지 않습니다.
 - Notification Service는 EnvironmentControlEvent만 구독하며, 저장용 EnvironmentMeasuredEvent는 구독하지 않습니다.

@@ -27,6 +27,14 @@ Environment Setting이 생성됩니다. 이때 API로 주고받는 단일 목표
 > 소유하지 않으며, Cultivation Service가 발행하는 이벤트를 구독해 시뮬레이션에 필요한 최소 정보만
 > 자체 캐시(`sensor_cache`)로 보관합니다. (자세한 내용은 [datasource-generator-db.md](./datasource-generator-db.md) 참고)
 
+> ℹ️ **변경 이력**: 센서 등록 시 사용자로부터 받는 정보가 `device_eui`(장치 고유 식별자)
+> 중심으로 재정의되면서 `sensor` 테이블도 전면 교체했습니다. 대리키(`id BIGSERIAL`) 대신
+> `device_eui`를 PK로 사용하고, `place`/`location`/`device_model` 컬럼을 추가했습니다.
+> `sensor_uuid`/`name`/`installed_at`은 제거했고, 별도 `datasource` 엔티티에 대한
+> `datasource_id` 참조도 없앴습니다. 위치 정보(place/location)는 이제 데이터 소스를 거치지
+> 않고 센서 레코드에 직접 저장합니다. 이에 따라 DatasourceGenerator DB의 `datasource`
+> 테이블도 함께 폐지되었습니다. (자세한 내용은 [datasource-generator-db.md](./datasource-generator-db.md) 참고)
+
 ---
 
 # ERD
@@ -104,14 +112,13 @@ FK  cultivation_id
 
 cultivation (1) ──── (N) sensor  ※ 위 체인과 별도로 cultivation에서 바로 분기
 ──────────────────────────────────────────────
-PK  id
+PK  device_eui
 FK  cultivation_id
-    datasource_id (소프트 참조, DatasourceGenerator DB)
-    sensor_uuid
+    place
+    location
+    device_model
     sensor_type
-    name
     status
-    installed_at
     created_at
     updated_at
 ```
@@ -227,22 +234,25 @@ Cultivation Service가 단일값을 범위로 변환해 저장합니다. 아래 
 
 재배에 연결된 센서 장치의 메타데이터를 관리합니다. (기존 DatasourceGenerator DB에서 이전)
 
+센서 등록 시 사용자로부터 받는 정보를 기준으로 설계했습니다. 대리키(BIGSERIAL) 대신
+`device_eui`(장치 고유 식별자)를 PK로 사용하며, 위치 정보(place/location)를 별도
+데이터 소스 엔티티 없이 센서 레코드에 직접 저장합니다.
+
 | Column | Type | Description |
 |---------|------|-------------|
-| id | BIGSERIAL | PK |
+| device_eui | INT | PK, 장치 고유 식별자 (하드웨어 EUI) |
 | cultivation_id | BIGINT | 재배 (FK, 같은 DB 내 실제 외래키) |
-| datasource_id | BIGINT | 데이터 소스 (DatasourceGenerator DB에 대한 소프트 참조, FK 제약 없음) |
-| sensor_uuid | UUID | 센서 고유 ID |
+| place | VARCHAR(50) | 설치 장소 (예: 1동 A구역) |
+| location | VARCHAR(50) | 세부 위치 |
+| device_model | VARCHAR(100) | 장치 모델명 |
 | sensor_type | VARCHAR(30) | 센서 종류 |
-| name | VARCHAR(100) | 센서 이름 |
-| status | VARCHAR(20) | 상태 (ONLINE/OFFLINE/ERROR/MAINTENANCE) |
-| installed_at | TIMESTAMP | 설치일 |
+| status | VARCHAR(20) | 상태 (ONLINE/OFFLINE/ERROR/MAINTENANCE), 시스템이 관리 (사용자 입력 아님) |
 | created_at | TIMESTAMP | 생성일 |
 | updated_at | TIMESTAMP | 수정일 |
 
-`datasource_id`는 DatasourceGenerator DB의 `datasource` 테이블을 참조하지만, 서로 다른 서비스의
-DB이므로 DB 레벨 FK 제약은 걸지 않습니다. (`cultivation.user_id`가 Auth DB의 `users`를 참조하는
-방식과 동일한 패턴)
+`place`/`location`/`device_model`/`sensor_type`은 사용자가 센서 등록 시 직접 입력하는 값이며,
+`status`는 등록 시 기본값(ONLINE)으로 시작해 이후 SensorErrorEvent로만 갱신됩니다.
+`cultivation_id`는 요청 body가 아니라 URL 경로(`/cultivations/{cultivationId}/sensors`)로부터 채워집니다.
 
 ---
 
@@ -415,21 +425,19 @@ CREATE TABLE photo (
 ```sql
 CREATE TABLE sensor (
 
-    id BIGSERIAL PRIMARY KEY,
+    device_eui INT NOT NULL PRIMARY KEY,
 
     cultivation_id BIGINT NOT NULL,
 
-    datasource_id BIGINT NOT NULL,
+    place VARCHAR(50),
 
-    sensor_uuid UUID NOT NULL UNIQUE,
+    location VARCHAR(50),
 
-    sensor_type VARCHAR(30) NOT NULL,
+    device_model VARCHAR(100),
 
-    name VARCHAR(100) NOT NULL,
+    sensor_type VARCHAR(30),
 
     status VARCHAR(20) NOT NULL DEFAULT 'ONLINE',
-
-    installed_at TIMESTAMP,
 
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -443,7 +451,10 @@ CREATE TABLE sensor (
 );
 ```
 
-`datasource_id`는 DatasourceGenerator DB를 참조하는 소프트 참조이므로 DB 레벨 FK 제약을 걸지 않습니다.
+`device_eui`는 BIGSERIAL로 자동 채번하지 않고, 등록 시 사용자가 입력한 장치 고유 식별자를
+그대로 PK로 사용합니다. `place`/`location`/`device_model`/`sensor_type`은 사용자 입력 그대로
+nullable이며, `status`만 시스템이 관리하는 NOT NULL 컬럼입니다. 더 이상 별도 `datasource`
+테이블/FK가 없습니다(폐지됨).
 
 ---
 
@@ -500,11 +511,6 @@ ON photo(uploaded_at);
 ## sensor
 
 ```sql
-CREATE UNIQUE INDEX uk_sensor_uuid
-ON sensor(sensor_uuid);
-```
-
-```sql
 CREATE INDEX idx_sensor_cultivation
 ON sensor(cultivation_id);
 ```
@@ -513,6 +519,8 @@ ON sensor(cultivation_id);
 CREATE INDEX idx_sensor_status
 ON sensor(status);
 ```
+
+device_eui가 PK이므로 별도 UNIQUE 인덱스는 필요하지 않습니다.
 
 ---
 
@@ -644,15 +652,18 @@ Harvest 생성
 
 사용자가
 
-- 센서 이름
-- 센서 종류
-- 연결할 데이터 소스(datasourceId)
+- device_eui (장치 고유 식별자)
+- place (설치 장소)
+- location (세부 위치)
+- device_model (장치 모델명)
+- sensor_type (센서 종류)
 
-를 입력해 재배에 센서를 등록합니다.
+를 입력해 재배에 센서를 등록합니다. cultivation_id는 URL 경로에서 채워지며, status는
+시스템이 ONLINE으로 초기화합니다.
 
 ↓
 
-sensor 생성 (cultivation_id는 실제 FK, datasource_id는 소프트 참조)
+sensor 생성 (device_eui가 PK, cultivation_id는 실제 FK)
 
 ↓
 
@@ -692,10 +703,11 @@ Harvest
 Photo (RUNNING 기간 중 언제든 업로드 가능)
 
 
-Cultivation ── (1:N) ── Sensor ── (소프트 참조) ── DatasourceGenerator.datasource
+Cultivation ── (1:N) ── Sensor
 
 Sensor 등록/삭제 이벤트는 DatasourceGenerator(sensor_cache)로,
 SensorErrorEvent(Rule Engine Service 발행)는 Cultivation Service(sensor.status)로 전달됩니다.
+별도 datasource 엔티티는 더 이상 존재하지 않습니다(place/location을 sensor에 직접 저장).
 ```
 
 ---
@@ -712,7 +724,8 @@ SensorErrorEvent(Rule Engine Service 발행)는 Cultivation Service(sensor.statu
 - Environment Setting은 Cultivation당 하나만 존재합니다.
 - Harvest는 재배 종료 후에만 생성됩니다.
 - 센서 "장치" 메타데이터(sensor 테이블)는 Cultivation DB(PostgreSQL)에 저장하지만, 센서가 측정한 "값"(시계열)은 Sensor Service의 InfluxDB에서 관리하며 이 DB에는 저장하지 않습니다. 두 "sensor"는 서로 다른 데이터입니다.
-- sensor.cultivation_id는 같은 DB 내 실제 FK이지만, sensor.datasource_id는 DatasourceGenerator DB에 대한 소프트 참조(FK 제약 없음)입니다.
+- sensor.device_eui는 대리키가 아닌 사용자가 입력하는 장치 고유 식별자를 그대로 PK로 사용합니다.
+- 별도 datasource 테이블/엔티티는 존재하지 않습니다. 위치 정보(place/location)는 센서 레코드에 직접 저장하며, 여러 센서가 같은 place/location 값을 자유롭게 공유할 수 있습니다(정규화하지 않음).
 - 사진 원본 파일은 PostgreSQL이 아닌 MinIO에 저장하고, image_url만 저장합니다.
 - 사진은 카메라 센서가 아닌 사용자가 직접 촬영하여 업로드합니다.
 - 하나의 재배(cultivation)에는 여러 장의 photo가 누적될 수 있습니다.
