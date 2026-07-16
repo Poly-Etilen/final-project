@@ -29,6 +29,11 @@ Bearer JWT
 > "설명 문서 생성"이 목적이라 LLM을 그대로 사용하되, `mushroomType`(5종 고정) 기준으로
 > 캐싱해 동일 종류에 대한 반복 호출을 피합니다.
 
+> ℹ️ **변경 이력**: `mushroom_reference`(Cultivation DB)에 특성/효능/재배 가이드/추가 정보
+> 원문이 추가되면서, 캐시 미스 시 AI Service가 Cultivation Service를 OpenFeign으로 호출해
+> (`GET /api/v1/mushroom-references/{mushroomType}`) 이 원문을 RAG 컨텍스트로 가져온 뒤
+> LLM에 전달합니다. LLM은 원문을 그대로 반환하지 않고 자연스러운 문장으로 재구성합니다.
+
 ---
 
 # 생육 분석 (Vision)
@@ -125,7 +130,11 @@ Redis 캐시 조회 (ai:mushroom:{mushroomType}:guide)
 
 ↓
 
-Cache Miss 시 LLM 호출 (효능/주의사항 생성) → Redis에 캐시 저장 (TTL 7일)
+Cache Miss 시 Cultivation Service OpenFeign 호출 (`GET /api/v1/mushroom-references/{mushroomType}`, RAG 컨텍스트 조회)
+
+↓
+
+LLM 호출 (characteristics/healthBenefits/cultivationGuide/additionalInfo를 참고해 효능/주의사항 생성) → Redis에 캐시 저장 (TTL 7일)
 
 ---
 
@@ -138,6 +147,10 @@ Cache Miss 시 LLM 호출 (효능/주의사항 생성) → Redis에 캐시 저�
     "precautions": "다습한 환경을 선호하지만 환기가 부족하면 곰팡이가 발생하기 쉬우니 CO₂ 농도 관리에 유의하세요."
 }
 ```
+
+`benefits`/`precautions`는 `mushroom_reference`의 원문(characteristics/healthBenefits/
+cultivationGuide/additionalInfo)을 LLM이 참고해 재구성한 결과이며, 원문을 그대로 반환하지
+않습니다.
 
 버섯 종류가 5가지로 고정되어 있어 같은 `mushroomType`이면 항상 같은 응답이 캐시에서
 반환됩니다. `mushroom_reference.description`(짧은 한 줄 참고 문구, 재배 생성 응답에 포함)과는
@@ -249,7 +262,7 @@ LLM
 | AI005 | 등록된 사진 없음 |
 | AI006 | Vision 모델 분석 실패 |
 | AI007 | API 호출 시간 초과 |
-| AI008 | 버섯 가이드 생성 실패 (LLM 응답 실패 포함) |
+| AI008 | 버섯 가이드 생성 실패 (LLM 응답 실패, Cultivation Service RAG 컨텍스트 조회 실패 포함) |
 
 ---
 
@@ -260,6 +273,7 @@ LLM
 ```
 Embedding Service (챗봇 유사 재배 사례 검색, 선택적 호출)
 Sensor Service (센서 데이터/통계 조회)
+Cultivation Service (버섯 가이드 RAG 컨텍스트 조회, GET /api/v1/mushroom-references/{mushroomType}, 캐시 미스 시에만)
 ```
 
 호출받는 서비스

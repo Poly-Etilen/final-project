@@ -212,8 +212,11 @@ Cultivation Service를 거치지 않으며, `cultivationId`도 필요하지 않�
 }
 ```
 
-AI Service는 이 응답을 mushroomType 기준으로 캐싱합니다(TTL 7일). 버섯 종류가 5가지로
-고정되어 있어 같은 종류라면 항상 같은 내용이 반환됩니다. (자세한 내용은
+AI Service는 이 응답을 mushroomType 기준으로 캐싱합니다(TTL 7일). 캐시 미스 시 AI Service는
+Cultivation Service를 OpenFeign으로 호출해(`GET /api/v1/mushroom-references/{mushroomType}`)
+mushroom_reference의 characteristics/healthBenefits/cultivationGuide/additionalInfo 원문을
+가져오고, 이를 LLM 프롬프트의 RAG 컨텍스트로 활용해 benefits/precautions를 생성합니다. 버섯
+종류가 5가지로 고정되어 있어 같은 종류라면 항상 같은 내용이 반환됩니다. (자세한 내용은
 [ai-api.md](../02_API/ai-api.md)의 "버섯 가이드" 참고)
 
 ---

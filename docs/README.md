@@ -178,6 +178,20 @@ On/Off가 발생할 수 있었습니다. 이를 보완했습니다.
 - 이 제어를 구현하려면 Rule Engine Service가 재배별/장치별 현재 ON/OFF 상태를 추적해야 하는데, 구체적인 저장 방식(Redis 키 설계 등)은 아직 확정하지 않았고 추후 개발 예정으로 남겨뒀습니다.
 - (자세한 내용은 [rule-Engine.md](./01_Domain/rule-Engine.md), [environment-control.md](./04_sequence/environment-control.md) 참고)
 
+### 15. `mushroom_reference`에 이름/특성/효능/재배 가이드 등 텍스트 데이터를 병합했다
+
+공공데이터로 확보한 버섯별 상세 정보(이름 한글/영문/학명, 특성, 효능, 재배 가이드, 추가 정보,
+임베딩)를 별도 `mushroom`이라는 테이블(PK `mushroom_id`)로 논의했지만, 버섯 종류당 한 행만
+존재하는 정적 참조 데이터라는 점에서 기존 `mushroom_reference`와 본질적으로 같은 데이터이므로
+병합하기로 했습니다.
+
+- `mushroom_reference`에 `mushroom_name_ko`/`mushroom_name_en`/`mushroom_scientific_name`/`characteristics`/`health_benefits`/`cultivation_guide`/`additional_info` 컬럼이 추가되었습니다. PK는 기존과 동일하게 `mushroom_type`을 유지하고, 별도 대리키 `mushroom_id`는 도입하지 않았습니다(`mushroom_type`이 이미 재배 생성 API, AI 버섯 가이드 API 등 시스템 전반의 식별자이기 때문입니다).
+- 원안의 `embedding VECTOR(1024)` 컬럼은 Cultivation DB(PostgreSQL)에 두지 않았습니다. 이미 [elasticSearch.md](./03_Database/elasticSearch.md)에 "PostgreSQL과 데이터를 중복 저장하지 않는다"는 원칙이 있었고, 임베딩 계산/보관은 Embedding Service의 책임이기 때문입니다. 대신 Cultivation Service가 `MushroomReferenceUpdatedEvent`를 발행하면 Embedding Service가 구독해 characteristics/health_benefits/cultivation_guide/additional_info를 임베딩하고 Elasticsearch의 `mushroom_environment` 인덱스를 갱신합니다.
+- AI Service의 "버섯 가이드"(결정 사항 13번)는 이제 이 텍스트를 무(無)에서 생성하지 않고, Cultivation Service를 OpenFeign으로 호출해(`GET /api/v1/mushroom-references/{mushroomType}`, 내부용) 가져온 원문을 LLM 프롬프트의 RAG 컨텍스트로 사용합니다. LLM은 원문을 그대로 반환하지 않고 자연스러운 문장의 `benefits`/`precautions`로 재구성합니다.
+- 전체 재생성(임베딩 모델 교체 등 예외 상황)을 위한 `GET /api/v1/mushroom-references`(전체 목록, 내부용) 엔드포인트도 함께 추가했습니다. 평상시 동기화는 이벤트 기반이라 이 호출은 드뭅니다.
+- Elasticsearch의 `mushroom_environment` 인덱스 스키마도 이 필드들을 반영하도록 확장했습니다.
+- (자세한 내용은 [cultivation-db.md](./03_Database/cultivation-db.md), [cultivation.md](./01_Domain/cultivation.md), [cultivation-api.md](./02_API/cultivation-api.md), [ai.md](./01_Domain/ai.md), [ai-api.md](./02_API/ai-api.md), [embedding.md](./01_Domain/embedding.md), [embedding-api.md](./02_API/embedding-api.md), [elasticSearch.md](./03_Database/elasticSearch.md) 참고)
+
 ---
 
 # ✅ 해결된 이슈

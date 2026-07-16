@@ -345,6 +345,71 @@ sensor_cache 갱신용)
 
 ---
 
+# 버섯 참조 데이터 조회 (내부용)
+
+## GET /api/v1/mushroom-references/{mushroomType}
+
+`mushroom_reference`의 원문 텍스트 데이터를 조회합니다. 사용자가 아닌 **AI Service가 "버섯
+가이드"(`POST /ai/mushroom-guide`) 생성 시 RAG 컨텍스트로 사용하기 위해서만 호출**하는
+내부용 엔드포인트입니다.
+
+> ℹ️ **변경 이력**: `mushroom_reference`에 이름/특성/효능/재배 가이드/추가 정보 컬럼이
+> 추가되면서, AI Service가 "버섯 가이드"를 생성할 때 이 원문 데이터를 참고할 수 있도록 이
+> 엔드포인트를 추가했습니다. (자세한 내용은 [cultivation-db.md](../03_Database/cultivation-db.md)
+> 참고)
+
+### Response
+
+```json
+{
+    "mushroomType": "OYSTER",
+    "mushroomNameKo": "느타리버섯",
+    "mushroomNameEn": "Oyster Mushroom",
+    "mushroomScientificName": "Pleurotus ostreatus",
+    "characteristics": "군생하며 갓은 회갈색~담회색을 띠고, 균사 성장 속도가 빠른 편입니다.",
+    "healthBenefits": "식이섬유와 베타글루칸이 풍부해 면역력 강화와 콜레스테롤 감소에 도움을 줍니다.",
+    "cultivationGuide": "다습한 환경을 선호하지만 환기가 부족하면 곰팡이가 발생하기 쉬우니 CO₂ 농도 관리에 유의해야 합니다.",
+    "additionalInfo": null
+}
+```
+
+환경 범위(temp/humidity/co2/light)와 `description`(짧은 참고 문구)은 이미 "재배 생성" 응답에
+포함되므로 이 엔드포인트 응답에는 포함하지 않습니다.
+
+---
+
+# 버섯 참조 데이터 전체 목록 조회 (내부용)
+
+## GET /api/v1/mushroom-references
+
+`mushroom_reference`의 전체 목록(모든 필드)을 조회합니다. **Embedding Service가 Elasticsearch
+전체 재생성(예: 임베딩 모델 교체) 시에만 호출**하는 내부용 엔드포인트입니다. 평상시 동기화는
+`MushroomReferenceUpdatedEvent`로 이루어지므로 이 호출은 드뭅니다.
+
+### Response
+
+```json
+[
+    {
+        "mushroomType": "OYSTER",
+        "mushroomNameKo": "느타리버섯",
+        "mushroomNameEn": "Oyster Mushroom",
+        "mushroomScientificName": "Pleurotus ostreatus",
+        "temperature": {"min": 15.0, "max": 18.0},
+        "humidity": {"min": 85, "max": 95},
+        "co2": {"min": 700, "max": 900},
+        "light": {"min": 300, "max": 400},
+        "description": "느타리버섯은 서늘하고 다습한 환경에서 균사 활착이 빠릅니다.",
+        "characteristics": "군생하며 갓은 회갈색~담회색을 띠고, 균사 성장 속도가 빠른 편입니다.",
+        "healthBenefits": "식이섬유와 베타글루칸이 풍부해 면역력 강화와 콜레스테롤 감소에 도움을 줍니다.",
+        "cultivationGuide": "다습한 환경을 선호하지만 환기가 부족하면 곰팡이가 발생하기 쉬우니 CO₂ 농도 관리에 유의해야 합니다.",
+        "additionalInfo": null
+    }
+]
+```
+
+---
+
 # 센서 전체 목록 조회 (내부용)
 
 ## GET /api/v1/sensors
@@ -389,9 +454,10 @@ place/location/deviceModel/status 등 상세 메타데이터는 포함하지 않
 
 사용 서비스
 
-- AI Service
+- AI Service ("버섯 가이드" 생성 시 `GET /api/v1/mushroom-references/{mushroomType}` 호출. 생육 사진 Vision 분석은 반대로 Cultivation Service가 AI Service를 호출하는 방향이라 여기 해당하지 않음)
 - Sensor Service
 - DatasourceGenerator (서비스 시작 시에만, `GET /api/v1/sensors` 전체 목록 조회)
+- Embedding Service (Elasticsearch 전체 재생성 시에만, `GET /api/v1/mushroom-references` 전체 목록 조회. 평상시에는 MushroomReferenceUpdatedEvent로만 동기화)
 
 센서 등록/삭제 자체는 DatasourceGenerator를 동기 호출하지 않고 이벤트(RabbitMQ)로만 전달합니다.
 DatasourceGenerator가 Cultivation Service를 OpenFeign으로 호출하는 것은 재시작 시 메모리 캐시를
@@ -408,6 +474,7 @@ DatasourceGenerator가 Cultivation Service를 OpenFeign으로 호출하는 것�
 - EnvironmentRangeUpdatedEvent
 - SensorRegisteredEvent (센서 등록 시, 구독: DatasourceGenerator — 재배 생성 시 `devices`로 함께 등록한 센서도 각각 발행됨)
 - SensorDeletedEvent (센서 삭제 시, 구독: DatasourceGenerator)
+- MushroomReferenceUpdatedEvent (관리자가 mushroom_reference를 등록/수정할 때, 구독: Embedding Service — Elasticsearch의 mushroom_environment 인덱스 갱신용)
 
 구독 이벤트
 

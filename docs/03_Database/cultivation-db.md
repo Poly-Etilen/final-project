@@ -35,6 +35,19 @@ Environment Setting이 생성됩니다. 이때 API로 주고받는 단일 목표
 > 않고 센서 레코드에 직접 저장합니다. 이에 따라 DatasourceGenerator DB의 `datasource`
 > 테이블도 함께 폐지되었습니다. (자세한 내용은 [datasource-generator-db.md](./datasource-generator-db.md) 참고)
 
+> ℹ️ **변경 이력**: `mushroom_reference`에 이름(한글/영문/학명), 특성, 효능, 재배 가이드,
+> 추가 정보 컬럼이 추가되었습니다. 원래 이 데이터는 별도 `mushroom`이라는 테이블(PK
+> `mushroom_id`)로 논의되었지만, 버섯 종류당 정확히 한 행만 존재하는 정적 참조 데이터라는
+> 점에서 `mushroom_reference`와 본질적으로 같은 데이터이므로 병합했습니다. PK는 기존과 동일하게
+> `mushroom_type`을 유지합니다(이미 재배 생성 API, AI 버섯 가이드 API 등 시스템 전반에서
+> 식별자로 쓰이고 있어, 별도 대리키 `mushroom_id`를 새로 도입할 이유가 없습니다). 원본 DDL에
+> 있던 `embedding VECTOR(1024)` 컬럼은 PostgreSQL(Cultivation DB)에 두지 않았습니다. 이미
+> [elasticSearch.md](./elasticSearch.md)에 "PostgreSQL과 데이터를 중복 저장하지 않는다"는
+> 원칙이 있고, 임베딩을 계산/보관하는 책임은 Embedding Service에 있기 때문입니다. 대신
+> Cultivation Service가 `MushroomReferenceUpdatedEvent`를 발행하면 Embedding Service가
+> 구독해 Elasticsearch의 `mushroom_environment` 인덱스를 갱신합니다. (자세한 내용은
+> [elasticSearch.md](./elasticSearch.md), [embedding.md](../01_Domain/embedding.md) 참고)
+
 ---
 
 # ERD
@@ -43,6 +56,9 @@ Environment Setting이 생성됩니다. 이때 API로 주고받는 단일 목표
 mushroom_reference (전역 참조 테이블, cultivation과 FK 관계 없음)
 ──────────────────────────────────────────────
 PK  mushroom_type
+    mushroom_name_ko
+    mushroom_name_en
+    mushroom_scientific_name
     temp_min
     temp_max
     humidity_min
@@ -52,6 +68,10 @@ PK  mushroom_type
     light_min
     light_max
     description
+    characteristics
+    health_benefits
+    cultivation_guide
+    additional_info
     created_at
     updated_at
 
@@ -137,7 +157,10 @@ FK  cultivation_id
 
 | Column | Type | Description |
 |---------|------|-------------|
-| mushroom_type | VARCHAR(50) | PK, 버섯 종류 |
+| mushroom_type | VARCHAR(50) | PK, 버섯 종류 코드 (예: OYSTER) |
+| mushroom_name_ko | VARCHAR(50) | 버섯 한글 이름 (예: 느타리버섯) |
+| mushroom_name_en | VARCHAR(50) | 버섯 영문 이름 (예: Oyster Mushroom) |
+| mushroom_scientific_name | VARCHAR(50) | 학명 (예: Pleurotus ostreatus) |
 | temp_min | DECIMAL(4,1) | 최적 온도 하한 |
 | temp_max | DECIMAL(4,1) | 최적 온도 상한 |
 | humidity_min | DECIMAL(4,1) | 최적 습도 하한 |
@@ -146,9 +169,19 @@ FK  cultivation_id
 | co2_max | INT | 최적 CO₂ 상한 |
 | light_min | INT | 최적 조도 하한 |
 | light_max | INT | 최적 조도 상한 |
-| description | VARCHAR(500) | 버섯별 생육 특성 설명 |
+| description | VARCHAR(500) | 짧은 한 줄 참고 문구 (재배 생성 응답에 그대로 노출) |
+| characteristics | TEXT | 버섯의 특성 설명 (버섯 가이드 RAG 컨텍스트) |
+| health_benefits | TEXT | 효능 (버섯 가이드 RAG 컨텍스트) |
+| cultivation_guide | TEXT | 재배 시 주의사항/가이드 (버섯 가이드 RAG 컨텍스트) |
+| additional_info | TEXT | 기타 추가 정보 (버섯 가이드 RAG 컨텍스트) |
 | created_at | TIMESTAMP | 생성일 |
 | updated_at | TIMESTAMP | 수정일 |
+
+`description`은 재배 생성 응답에 그대로 노출되는 짧은 참고 문구이고,
+`characteristics`/`health_benefits`/`cultivation_guide`/`additional_info`는 AI Service의
+"버섯 가이드"(`POST /ai/mushroom-guide`) 기능이 LLM 프롬프트에 RAG 컨텍스트로 넣어 자연스러운
+문장으로 재구성하는 원문 데이터입니다. AI Service는 이 값을 그대로 반환하지 않고, LLM으로
+다듬어서 `benefits`/`precautions` 형태로 응답합니다.
 
 ---
 
@@ -265,6 +298,12 @@ CREATE TABLE mushroom_reference (
 
     mushroom_type VARCHAR(50) PRIMARY KEY,
 
+    mushroom_name_ko VARCHAR(50),
+
+    mushroom_name_en VARCHAR(50),
+
+    mushroom_scientific_name VARCHAR(50),
+
     temp_min DECIMAL(4,1) NOT NULL,
 
     temp_max DECIMAL(4,1) NOT NULL,
@@ -283,6 +322,14 @@ CREATE TABLE mushroom_reference (
 
     description VARCHAR(500),
 
+    characteristics TEXT,
+
+    health_benefits TEXT,
+
+    cultivation_guide TEXT,
+
+    additional_info TEXT,
+
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -290,13 +337,25 @@ CREATE TABLE mushroom_reference (
 );
 ```
 
+`embedding VECTOR(1024)` 컬럼은 이 테이블에 두지 않습니다. Elasticsearch와의 데이터 중복 저장을
+피하기 위해서이며, 임베딩은 Embedding Service가 계산해 Elasticsearch에만 저장합니다. (아래
+"관계" 참고)
+
 시드 데이터 예시
 
 ```sql
 INSERT INTO mushroom_reference
-    (mushroom_type, temp_min, temp_max, humidity_min, humidity_max, co2_min, co2_max, light_min, light_max, description)
+    (mushroom_type, mushroom_name_ko, mushroom_name_en, mushroom_scientific_name,
+     temp_min, temp_max, humidity_min, humidity_max, co2_min, co2_max, light_min, light_max,
+     description, characteristics, health_benefits, cultivation_guide, additional_info)
 VALUES
-    ('OYSTER', 15.0, 18.0, 85, 95, 700, 900, 300, 400, '느타리버섯은 서늘하고 다습한 환경에서 균사 활착이 빠릅니다.');
+    ('OYSTER', '느타리버섯', 'Oyster Mushroom', 'Pleurotus ostreatus',
+     15.0, 18.0, 85, 95, 700, 900, 300, 400,
+     '느타리버섯은 서늘하고 다습한 환경에서 균사 활착이 빠릅니다.',
+     '군생하며 갓은 회갈색~담회색을 띠고, 균사 성장 속도가 빠른 편입니다.',
+     '식이섬유와 베타글루칸이 풍부해 면역력 강화와 콜레스테롤 감소에 도움을 줍니다.',
+     '다습한 환경을 선호하지만 환기가 부족하면 곰팡이가 발생하기 쉬우니 CO₂ 농도 관리에 유의해야 합니다.',
+     NULL);
 ```
 
 공공데이터 기준 5종(느타리, 새송이, 표고, 팽이, 양송이 등) 데이터를 시드로 등록합니다.
@@ -708,6 +767,29 @@ Cultivation ── (1:N) ── Sensor
 Sensor 등록/삭제 이벤트는 DatasourceGenerator(sensor_cache)로,
 SensorErrorEvent(Rule Engine Service 발행)는 Cultivation Service(sensor.status)로 전달됩니다.
 별도 datasource 엔티티는 더 이상 존재하지 않습니다(place/location을 sensor에 직접 저장).
+
+
+mushroom_reference (관리자 등록/수정, cultivation과 FK 없음)
+
+↓
+
+RabbitMQ Publish (MushroomReferenceUpdatedEvent)
+
+↓
+
+Embedding Service (characteristics/health_benefits/cultivation_guide/additional_info를
+임베딩하여 Elasticsearch의 mushroom_environment 인덱스 갱신)
+
+
+mushroom_reference (characteristics/health_benefits/cultivation_guide/additional_info)
+
+↓
+
+AI Service가 OpenFeign으로 조회 (`GET /api/v1/mushroom-references/{mushroomType}`)
+
+↓
+
+LLM 프롬프트에 RAG 컨텍스트로 삽입 → "버섯 가이드"(효능/주의사항) 응답 생성
 ```
 
 ---
@@ -718,6 +800,9 @@ SensorErrorEvent(Rule Engine Service 발행)는 Cultivation Service(sensor.statu
 - 사용자가 저장한 환경(environment_setting)만 저장합니다.
 - mushroom_reference는 "최적 생육 범위"(참고용 추천 데이터), environment_setting은 "위험 한계값"(실제 자동 제어 기준)으로 목적이 다릅니다. Rule Engine Service는 mushroom_reference를 직접 참조하지 않고, 항상 environment_setting(및 그 Redis 캐시)만 사용합니다.
 - mushroom_reference는 cultivation_id가 없는 전역 테이블이며, 버섯 종류가 5종으로 고정되어 있어 관리자가 값을 갱신하기 전까지 정적으로 유지됩니다.
+- mushroom_reference에는 이름(한글/영문/학명), 특성, 효능, 재배 가이드, 추가 정보 컬럼도 함께 있지만, 이 값들의 임베딩(벡터)은 이 테이블에 저장하지 않습니다. Elasticsearch와 데이터를 중복 저장하지 않기 위해서이며, 임베딩 계산과 보관은 Embedding Service/Elasticsearch의 책임입니다.
+- mushroom_reference가 생성/수정되면 `MushroomReferenceUpdatedEvent`를 발행해 Embedding Service가 Elasticsearch 인덱스를 갱신하도록 합니다. 데이터가 정적이라 이 이벤트는 관리자가 참조 데이터를 등록/수정할 때만 드물게 발생합니다.
+- characteristics/health_benefits/cultivation_guide/additional_info는 AI Service가 "버섯 가이드" 기능에서 LLM 프롬프트의 RAG 컨텍스트로만 사용하며, 그대로 응답에 노출하지 않습니다.
 - environment_setting은 단일 목표값이 아닌 범위(min~max)로 저장합니다. Rule Engine Service가 범위를 벗어날 때만 장치를 제어하도록 하여 불필요한 On/Off를 줄이기 위함입니다.
 - 단일값 → 범위 변환은 Cultivation Service 내부 로직이며, API 요청/응답 스펙에는 영향을 주지 않습니다.
 - 반대로 조회 시 단일값이 필요하면 저장된 범위의 중간값 `(min+max)/2`를 계산합니다. 허용 오차가 대칭이므로 이 값은 사용자가 원래 입력했던 단일값과 정확히 일치하며, 별도 컬럼에 원본값을 중복 저장하지 않습니다.

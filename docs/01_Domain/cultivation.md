@@ -53,6 +53,11 @@ Cultivation Service가 담당합니다.
 이후 자체 보유한 `mushroom_reference` 참조 테이블(공공데이터 기반 5종 버섯의 최적 환경 범위)을
 버섯 종류로 조회하여 추천값을 반환합니다. AI Service를 호출하지 않습니다.
 
+> ℹ️ **변경 이력**: `mushroom_reference`에 이름(한글/영문/학명), 특성, 효능, 재배 가이드, 추가
+> 정보 컬럼이 추가되었습니다. 이 원문 텍스트는 재배 생성 응답에는 포함되지 않고, AI Service가
+> "버섯 가이드" 기능에서 `GET /api/v1/mushroom-references/{mushroomType}`(내부용)로 조회해
+> LLM 프롬프트의 RAG 컨텍스트로 사용합니다. (자세한 내용은 [ai.md](./ai.md) 참고)
+
 > ℹ️ **변경 이력**: 원래는 AI Service(Embedding/Vector Search/LLM)를 호출해 추천값을 생성했지만,
 > 버섯 종류가 공공데이터 기준 5가지로 고정되어 있어 항상 동일한 값이 나오는 조회에는 AI가
 > 불필요하다고 판단, Cultivation Service가 직접 보유한 참조 테이블 조회로 단순화했습니다.
@@ -288,6 +293,23 @@ DELETE /cultivations/{cultivationId}/sensors/{deviceEui}
 
 ---
 
+## 버섯 참조 데이터 조회 (내부용)
+
+GET /api/v1/mushroom-references/{mushroomType}
+
+AI Service가 "버섯 가이드" 생성 시에만 호출합니다. 자세한 내용은
+[cultivation-api.md](../02_API/cultivation-api.md) 참고.
+
+---
+
+## 버섯 참조 데이터 전체 목록 조회 (내부용)
+
+GET /api/v1/mushroom-references
+
+Embedding Service가 Elasticsearch 전체 재생성 시에만 호출합니다.
+
+---
+
 # Database
 
 Cultivation Service는 별도의 PostgreSQL Database를 사용합니다.
@@ -364,6 +386,17 @@ API Gateway
 서비스 재시작 시 `GET /api/v1/sensors`로 전체 센서 목록을 조회합니다. DatasourceGenerator는
 sensor_cache를 메모리(In-Memory)에만 보관하므로, 재시작하면 캐시가 비게 되어 이 방식으로
 복구합니다. (평상시 센서 등록/삭제는 이벤트로만 전달되며, 이때는 호출되지 않습니다.)
+
+### AI Service
+
+"버섯 가이드" 생성 시 `GET /api/v1/mushroom-references/{mushroomType}`로 mushroom_reference의
+특성/효능/재배 가이드/추가 정보를 조회합니다. LLM 프롬프트의 RAG 컨텍스트로만 사용되며,
+Cultivation Service는 이 값을 가공하지 않고 그대로 반환합니다.
+
+### Embedding Service
+
+Elasticsearch 전체 재생성이 필요할 때만 `GET /api/v1/mushroom-references`(전체 목록)를
+호출합니다. 평상시에는 `MushroomReferenceUpdatedEvent`로만 동기화하므로 이 호출은 드뭅니다.
 
 ---
 
@@ -446,6 +479,29 @@ place/location/deviceModel은 이벤트에 담지 않습니다(필요하면 Cult
 ```
 
 구독 서비스: DatasourceGenerator (sensor_cache에서 제거)
+
+---
+
+### MushroomReferenceUpdatedEvent
+
+관리자가 `mushroom_reference`를 등록/수정할 때 발행합니다. 버섯 종류가 5종으로 고정된 정적
+데이터라 매우 드물게 발생합니다.
+
+```json
+{
+    "mushroomType": "OYSTER",
+    "mushroomNameKo": "느타리버섯",
+    "mushroomNameEn": "Oyster Mushroom",
+    "mushroomScientificName": "Pleurotus ostreatus",
+    "characteristics": "군생하며 갓은 회갈색~담회색을 띠고, 균사 성장 속도가 빠른 편입니다.",
+    "healthBenefits": "식이섬유와 베타글루칸이 풍부해 면역력 강화와 콜레스테롤 감소에 도움을 줍니다.",
+    "cultivationGuide": "다습한 환경을 선호하지만 환기가 부족하면 곰팡이가 발생하기 쉬우니 CO₂ 농도 관리에 유의해야 합니다.",
+    "additionalInfo": null,
+    "updatedAt": "2026-08-15T09:00:00"
+}
+```
+
+구독 서비스: Embedding Service (텍스트를 임베딩해 Elasticsearch의 mushroom_environment 인덱스 갱신)
 
 ---
 

@@ -32,8 +32,11 @@
 
 ### 목적
 
-버섯 재배 정보를 관리합니다. 공공데이터 기반 5종 버섯의 최적 환경 범위(mushroom_reference)도 함께 보관하며,
-재배 생성 시 이 테이블을 조회해 AI/Embedding 호출 없이 추천값을 보여줍니다.
+버섯 재배 정보를 관리합니다. 공공데이터 기반 5종 버섯의 최적 환경 범위와 이름/특성/효능/재배
+가이드 등 참조 데이터(mushroom_reference)도 함께 보관하며, 재배 생성 시 이 테이블을 조회해
+AI/Embedding 호출 없이 추천값을 보여줍니다. 참조 데이터의 텍스트는 AI Service의 "버섯 가이드"
+기능(RAG 컨텍스트)과 Embedding Service의 Elasticsearch 인덱스(MushroomReferenceUpdatedEvent로
+동기화)에도 활용됩니다.
 
 ### Table
 
@@ -185,13 +188,16 @@ mushroom_environment
 
 ### Document
 
-- mushroomType
-- temperature
-- humidity
-- co2
-- light
+- mushroomType (문서 ID로도 사용)
+- mushroomNameKo / mushroomNameEn / mushroomScientificName
+- tempMin / tempMax / humidityMin / humidityMax / co2Min / co2Max / lightMin / lightMax
 - description
-- embedding(Vector)
+- characteristics / healthBenefits / cultivationGuide / additionalInfo
+- embedding(Vector) — characteristics/healthBenefits/cultivationGuide/additionalInfo를 결합해 생성
+
+Cultivation DB의 `mushroom_reference`와 1:1로 대응하며, `MushroomReferenceUpdatedEvent`로
+동기화됩니다. 임베딩 벡터는 Cultivation DB(PostgreSQL)에는 저장하지 않고 이 인덱스에만
+저장합니다. (자세한 내용은 [elasticSearch.md](./elasticSearch.md) 참고)
 
 ---
 
@@ -349,3 +355,43 @@ Cultivation Service에 OpenFeign 호출 (`GET /api/v1/sensors`, 전체 센서 �
 
 메모리 캐시이므로 재시작하면 비어 있습니다. 평상시에는 이벤트로만 갱신하지만, 시작 시점에는
 전체 목록을 한 번에 받아와 복구합니다.
+
+---
+
+# 버섯 참조 데이터 동기화 흐름 (Elasticsearch)
+
+## 평상시 (이벤트 기반)
+
+Cultivation Service
+
+↓
+
+관리자가 mushroom_reference 등록/수정 (PostgreSQL)
+
+↓
+
+RabbitMQ (MushroomReferenceUpdatedEvent)
+
+↓
+
+Embedding Service
+
+↓
+
+텍스트(characteristics/healthBenefits/cultivationGuide/additionalInfo) 임베딩 → Elasticsearch Upsert
+
+## 전체 재생성 시 (드묾, 예: 임베딩 모델 교체)
+
+Embedding Service
+
+↓
+
+Cultivation Service에 OpenFeign 호출 (`GET /api/v1/mushroom-references`, 전체 목록)
+
+↓
+
+전체 mushroomType 재임베딩 → Elasticsearch 일괄 Upsert
+
+mushroom_reference의 원본(source of truth)은 Cultivation DB(PostgreSQL)이며, 임베딩 벡터는
+PostgreSQL에 저장하지 않고 Elasticsearch에만 저장합니다(데이터 중복 방지). 버섯 종류가 5종으로
+고정된 정적 데이터라 이 동기화는 매우 드물게 발생합니다.

@@ -18,6 +18,14 @@ AI Service는 LLM과 RAG(Retrieval-Augmented Generation)를 활용하여 사용�
 > **버섯 종류(mushroomType) 기준으로 캐싱**하여 동일 종류에 대해 매번 LLM을 호출하지 않도록
 > 했습니다.
 
+> ℹ️ **변경 이력**: `mushroom_reference`(Cultivation DB)에 특성/효능/재배 가이드/추가 정보
+> 원문 텍스트가 추가되면서, "버섯 가이드"는 이 원문을 무(無)에서 생성하지 않고 **RAG 컨텍스트로
+> 활용**합니다. AI Service가 Cultivation Service를 OpenFeign으로 호출해(`GET
+> /api/v1/mushroom-references/{mushroomType}`) 원문 텍스트를 가져온 뒤, LLM이 이를 참고해
+> 더 자연스러운 문장의 `benefits`/`precautions`로 다듬어 응답합니다. 원문을 그대로 반환하지
+> 않는 이유는, 공공데이터 원문이 항목별로 파편화되어 있어 사용자에게는 자연어로 통합된 설명이
+> 더 읽기 좋기 때문입니다.
+
 ---
 
 # 책임
@@ -112,7 +120,13 @@ Vision 모델은 사전에 다양한 성장 단계의 사진으로 학습되어 
 `mushroom_reference.description`(짧은 한 줄 참고 문구, Cultivation Service가 재배 생성 응답에
 그대로 포함)과는 별개입니다. 버섯 가이드는 그보다 훨씬 자세한 설명(효능, 주의사항)을 LLM으로
 생성하는 별도 기능이며, Client가 재배 생성 이후 AI Service를 직접 호출해서 받습니다
-(Cultivation Service를 거치지 않습니다).
+(Cultivation Service를 거치지 않습니다. 다만 AI Service는 응답을 만들기 위해 내부적으로
+Cultivation Service를 OpenFeign으로 호출합니다).
+
+`mushroom_reference`에 저장된 characteristics(특성)/health_benefits(효능)/cultivation_guide
+(재배 가이드)/additional_info(추가 정보) 원문을 Cultivation Service로부터 가져와 LLM
+프롬프트의 RAG 컨텍스트로 사용합니다. LLM은 이 원문을 그대로 반환하지 않고, 자연스러운 문장의
+`benefits`/`precautions`로 재구성합니다.
 
 버섯 종류는 공공데이터 기준 5가지로 고정되어 있어 같은 종류라면 항상 같은 내용이 나오므로,
 `mushroomType` 기준으로 캐싱해 동일 종류에 대한 반복 LLM 호출을 피합니다. (재배 환경 추천을
@@ -226,6 +240,12 @@ AI Service는 Vision 분석을 위해 사진을 조회합니다.
 
 ---
 
+### Cultivation Service
+
+- 버섯 가이드 생성 시 `GET /api/v1/mushroom-references/{mushroomType}` 호출 (RAG 컨텍스트 조회, 캐시 미스 시에만)
+
+---
+
 ## 호출받는 서비스
 
 ### Cultivation Service
@@ -283,7 +303,11 @@ Cache Hit → 즉시 반환
 
 ↓
 
-Cache Miss → LLM 호출 (효능/주의사항 생성) → Redis 캐시 저장 (TTL 7일) → 반환
+Cache Miss → Cultivation Service OpenFeign 호출 (`GET /api/v1/mushroom-references/{mushroomType}`, RAG 컨텍스트 조회)
+
+↓
+
+LLM 호출 (원문을 참고해 효능/주의사항 생성) → Redis 캐시 저장 (TTL 7일) → 반환
 
 ↓
 
@@ -325,6 +349,7 @@ Client
 
 - Embedding 검색 실패
 - LLM 응답 실패 (버섯 가이드 생성 실패 포함)
+- 버섯 가이드 생성 시 Cultivation Service 호출 실패 (RAG 컨텍스트 조회 실패)
 - Redis Cache 조회 실패
 - Sensor 데이터 부족
 - 등록된 사진 없음
