@@ -8,6 +8,10 @@ Auth Service(기존 Auth+User 통합)가 이메일 인증부터 사용자 생성
 (기존에는 Auth Service가 auth_user 생성 후 User Service를 OpenFeign으로 호출해 프로필을 별도 생성했으나,
 서비스 통합으로 서비스 간 호출 없이 하나의 트랜잭션으로 처리합니다.)
 
+> ℹ️ **변경 이력**: 이 문서는 이메일/비밀번호(LOCAL) 회원가입만 다룹니다. 구글 소셜 로그인은
+> 별도의 회원가입 절차 없이 최초 로그인 시 자동으로 계정이 생성됩니다. 자세한 내용은
+> [login.md](./login.md)의 "구글 로그인" 참고.
+
 ---
 
 # Sequence
@@ -152,7 +156,7 @@ POST /auth/signup
 
 ↓
 
-`users` 생성 (email, password, role, email_verified, nickname 등 전체 프로필 컬럼 포함)
+`users` 생성 (email, password, provider='LOCAL', role, email_verified, nickname 등 전체 프로필 컬럼 포함)
 
 ↓
 

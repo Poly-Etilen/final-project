@@ -9,6 +9,9 @@
 Access Token은 Client에 전달되며,
 Refresh Token은 Redis에 저장하여 관리합니다.
 
+> ℹ️ **변경 이력**: 이메일/비밀번호(LOCAL) 로그인 외에 구글 소셜 로그인(GOOGLE)이
+> 추가되었습니다. 아래는 LOCAL 로그인 흐름이며, 구글 로그인은 "구글 로그인" 섹션을 참고하세요.
+
 ---
 
 # Sequence
@@ -246,6 +249,58 @@ Refresh Token 삭제
 
 ---
 
+# 구글 로그인
+
+```
+Client (구글 로그인 완료, ID Token 보유)
+
+↓
+
+API Gateway
+
+↓
+
+Auth Service
+
+↓
+
+구글 공개키로 ID Token 서명/만료 검증
+
+↓
+
+이메일/이름/프로필 이미지 추출
+
+↓
+
+users에서 (email, provider='GOOGLE') 조회
+
+├── 존재함 → 바로 다음 단계
+└── 존재하지 않음 → users 자동 생성
+      (provider='GOOGLE', password=NULL, email_verified=true,
+       nickname/profile_image_url은 구글 프로필 기본값)
+
+↓
+
+JWT 생성 (Access Token + Refresh Token)
+
+↓
+
+Redis 저장 (refresh:{userId})
+
+↓
+
+Client
+```
+
+이메일/비밀번호 검증(BCrypt) 단계가 없다는 점을 제외하면, JWT 생성/Refresh Token 저장/응답
+형식은 LOCAL 로그인과 동일합니다. 최초 로그인 시 자동 회원가입까지 한 번에 처리되므로, 별도의
+"구글 회원가입" API는 없습니다.
+
+같은 이메일로 LOCAL 계정이 이미 있어도 조회 조건이 `(email, provider)`이기 때문에 GOOGLE
+계정은 별도로 생성됩니다. 두 계정을 하나로 합치는 기능은 아직 없습니다.
+
+---
+
 # 사용 Database
 
 ## PostgreSQL
@@ -266,7 +321,10 @@ refresh:{userId}
 
 # OpenFeign
 
-사용하지 않습니다.
+서비스 간(내부 MSA) 호출은 사용하지 않습니다.
+
+구글 로그인 시 ID Token 검증을 위해 구글의 공개키 엔드포인트를 외부 HTTP 호출하지만, 이는
+내부 서비스 간 OpenFeign 호출이 아닙니다.
 
 ---
 
@@ -287,6 +345,8 @@ refresh:{userId}
 - Refresh Token 불일치
 - Redis 장애
 - JWT 생성 실패
+- 유효하지 않은 구글 ID Token (구글 로그인)
+- 구글 인증 서버 응답 실패/시간 초과 (구글 로그인)
 
 ---
 

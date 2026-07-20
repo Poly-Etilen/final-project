@@ -37,7 +37,7 @@ API Gateway를 포함해 9개 서비스로 구성됩니다. (기존 9개 서비�
 | 서비스 | 역할 요약 | Domain | API | Database | 관련 Sequence |
 |--------|-----------|--------|-----|----------|----------------|
 | API Gateway | 라우팅, 인증 토큰 검증 | - | - | - | 전체 시퀀스 최초 진입점 |
-| Auth | 인증/인가, JWT, 이메일 인증, 회원 프로필/탈퇴/재배 통계 (기존 Auth+User 통합) | [auth.md](./01_Domain/auth.md) | [auth-api.md](./02_API/auth-api.md) | [auth-db.md](./03_Database/auth-db.md) | [signup](./04_sequence/signup.md), [login](./04_sequence/login.md), [withdraw](./04_sequence/withdraw.md) |
+| Auth | 인증/인가(이메일+구글 소셜 로그인), JWT, 이메일 인증, 회원 프로필/탈퇴/재배 통계 (기존 Auth+User 통합) | [auth.md](./01_Domain/auth.md) | [auth-api.md](./02_API/auth-api.md) | [auth-db.md](./03_Database/auth-db.md) | [signup](./04_sequence/signup.md), [login](./04_sequence/login.md), [withdraw](./04_sequence/withdraw.md) |
 | Cultivation | 재배 생성/관리/수확/사진 업로드, 공공데이터 기반 환경 추천(`mushroom_reference` 조회), 센서 장치 등록/조회/삭제(재배 생성과 동시 등록 가능) | [cultivation.md](./01_Domain/cultivation.md) | [cultivation-api.md](./02_API/cultivation-api.md) | [cultivation-db.md](./03_Database/cultivation-db.md) | [create-cultivation](./04_sequence/create-cultivation.md), [harvest](./04_sequence/harvest.md), [growth-analysis](./04_sequence/growth-analysis.md), [sensor-error](./04_sequence/sensor-error.md) |
 | AI | 생육 분석(Vision), 챗봇, 리포트, 버섯 가이드(효능/주의사항) | [ai.md](./01_Domain/ai.md) | [ai-api.md](./02_API/ai-api.md) | Redis(캐시), MinIO(읽기 전용) | [create-cultivation](./04_sequence/create-cultivation.md), [growth-analysis](./04_sequence/growth-analysis.md), [harvest](./04_sequence/harvest.md), [ai-chat](./04_sequence/ai-chat.md), [ai-report](./04_sequence/ai-report.md) |
 | Embedding | 재배 참조 데이터 임베딩·벡터 검색 (AI 챗봇 유사 사례 검색용) | [embedding.md](./01_Domain/embedding.md) | [embedding-api.md](./02_API/embedding-api.md) | [elasticSearch.md](./03_Database/elasticSearch.md) | [ai-chat](./04_sequence/ai-chat.md) |
@@ -191,6 +191,19 @@ On/Off가 발생할 수 있었습니다. 이를 보완했습니다.
 - 전체 재생성(임베딩 모델 교체 등 예외 상황)을 위한 `GET /api/v1/mushroom-references`(전체 목록, 내부용) 엔드포인트도 함께 추가했습니다. 평상시 동기화는 이벤트 기반이라 이 호출은 드뭅니다.
 - Elasticsearch의 `mushroom_environment` 인덱스 스키마도 이 필드들을 반영하도록 확장했습니다.
 - (자세한 내용은 [cultivation-db.md](./03_Database/cultivation-db.md), [cultivation.md](./01_Domain/cultivation.md), [cultivation-api.md](./02_API/cultivation-api.md), [ai.md](./01_Domain/ai.md), [ai-api.md](./02_API/ai-api.md), [embedding.md](./01_Domain/embedding.md), [embedding-api.md](./02_API/embedding-api.md), [elasticSearch.md](./03_Database/elasticSearch.md) 참고)
+
+### 16. 구글 소셜 로그인을 추가하고, 회원 탈퇴 표현 방식을 `deleted_at`에서 `status`로 바꿨다
+
+`users` 테이블 DDL을 다시 검토하던 중, "추후 개발 예정"에 있던 구글 OAuth2 로그인을 실제로
+추가하기로 하면서 스키마를 함께 정리했습니다.
+
+- `users`에 `provider`(LOCAL/GOOGLE) 컬럼이 추가되었습니다. `email` 단독 `UNIQUE` 대신 `(email, provider)` 조합 `UNIQUE`로 바뀌어, 같은 이메일이라도 LOCAL 계정과 GOOGLE 계정을 별도 행으로 허용합니다(두 계정을 하나로 합치는 계정 연동은 추후 개발 예정). `password`는 GOOGLE 계정에는 없으므로 NULL을 허용하며, `provider가 LOCAL이면 password가 NOT NULL`이라는 CHECK 제약을 추가했습니다.
+- `POST /auth/google`이 신설되었습니다. 프론트엔드가 구글 로그인으로 받은 ID Token을 전달하면 Auth Service가 구글 공개키로 검증하고, 최초 로그인이면 자동으로 회원가입까지 처리합니다(별도의 "구글 회원가입" API는 없음).
+- `role`(USER/ADMIN)은 그대로 유지했습니다. mushroom_reference 갱신, Embedding 관리 API 같은 관리자 전용 기능이 이미 이 값에 의존하고 있어서, provider/status 추가와는 별개로 남겨뒀습니다.
+- 회원 탈퇴 표현 방식이 `deleted_at`(NULL 여부로 판단하는 타임스탬프)에서 `status`(ACTIVE/DELETED) 컬럼으로 바뀌었습니다. 탈퇴 시각은 별도 컬럼 없이, 탈퇴 처리 시점에 함께 갱신되는 `updated_at`으로 확인합니다.
+- `nickname`도 실제 `UNIQUE` 제약을 추가했습니다. 기존에는 인덱스만 있고 제약이 없었는데, 에러 코드 A009(중복 닉네임)가 이미 문서화되어 있던 것과 맞춰 정합성을 맞췄습니다.
+- (참고: 같은 시점에 검토한 `mushroom`/`environment_setting`/`cultivation`/`sensor`/`harvest` DDL 초안은 오래된 버전이었고, `mushroom_reference` 병합(결정 사항 15번)과 device_eui 기반 sensor 설계(결정 사항 10~11번) 등 기존 결정을 그대로 유지하기로 확인했습니다. 새 DDL 자체가 문서를 대체하지는 않았습니다.)
+- (자세한 내용은 [auth-db.md](./03_Database/auth-db.md), [auth.md](./01_Domain/auth.md), [auth-api.md](./02_API/auth-api.md), [login.md](./04_sequence/login.md), [withdraw.md](./04_sequence/withdraw.md) 참고)
 
 ---
 

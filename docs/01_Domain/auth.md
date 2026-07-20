@@ -10,11 +10,16 @@ Auth Service는 사용자의 인증(Authentication)/인가(Authorization)와 회
 
 JWT 기반 인증, 이메일 인증, 회원 프로필 조회/수정, 회원 탈퇴, 재배 통계 조회까지 모두 이 서비스가 처리합니다.
 
+> ℹ️ **변경 이력**: 구글 소셜 로그인이 추가되었습니다("추후 개발 예정"에서 승격). 이메일/비밀번호
+> 회원가입(LOCAL)과 구글 로그인(GOOGLE) 두 가지 방식을 지원하며, `users.provider`로
+> 구분합니다. 회원 탈퇴 처리 방식도 `deleted_at` 대신 `status`(ACTIVE/DELETED) 컬럼 기반으로
+> 바뀌었습니다. (자세한 내용은 [auth-db.md](../03_Database/auth-db.md) 참고)
+
 ---
 
 # 책임
 
-- 회원가입
+- 회원가입 (이메일/비밀번호, 구글 소셜 로그인)
 - 로그인 / 로그아웃
 - JWT 발급 및 검증
 - Refresh Token 관리
@@ -41,6 +46,20 @@ JWT 기반 인증, 이메일 인증, 회원 프로필 조회/수정, 회원 탈�
 ## 로그인
 
 이메일과 비밀번호를 검증한 후 JWT를 발급합니다.
+
+---
+
+## 구글 소셜 로그인
+
+사용자가 프론트엔드에서 구글 로그인으로 받은 ID Token을 Auth Service에 전달하면, 구글 공개키로
+서명을 검증하고 이메일을 추출합니다.
+
+- 기존에 같은 이메일+GOOGLE 조합의 계정이 있으면 바로 로그인 처리(JWT 발급)합니다.
+- 없으면 자동으로 회원가입합니다(provider=GOOGLE, password 없음, email_verified=true,
+  닉네임/프로필 이미지는 구글 프로필 정보를 기본값으로 사용). 별도 이메일 인증 절차를 거치지
+  않습니다(구글이 이미 검증한 이메일이기 때문).
+- 이메일/비밀번호(LOCAL)로 가입한 계정과는 별개의 계정으로 취급합니다. 같은 이메일이라도
+  provider가 다르면 다른 사용자로 저장됩니다(계정 연동은 추후 개발 예정).
 
 ---
 
@@ -98,7 +117,7 @@ Redis에 저장된 Refresh Token을 이용하여 Access Token을 재발급합니
 
 회원 탈퇴 시
 
-- 사용자 정보 Soft Delete
+- 사용자 정보 Soft Delete (`status`를 `'DELETED'`로 변경)
 - Refresh Token 삭제 (같은 서비스 내부 처리이므로 즉시 수행)
 - 재배 데이터 비활성화 (Cultivation Service에 이벤트 발행)
 
@@ -130,6 +149,12 @@ POST /auth/signup
 ## 로그인
 
 POST /auth/login
+
+---
+
+## 구글 로그인
+
+POST /auth/google
 
 ---
 
@@ -286,6 +311,40 @@ Client
 
 ---
 
+## 구글 로그인
+
+Client (구글 로그인 후 ID Token 보유)
+
+↓
+
+Gateway
+
+↓
+
+Auth Service
+
+↓
+
+ID Token 검증 (구글 공개키)
+
+↓
+
+이메일+provider(GOOGLE)로 users 조회
+
+↓
+
+없으면 자동 회원가입 (provider=GOOGLE, email_verified=true)
+
+↓
+
+JWT 발급
+
+↓
+
+Client
+
+---
+
 ## 회원 탈퇴
 
 Client
@@ -321,12 +380,14 @@ Cultivation Service → 재배 데이터 비활성화
 - 이메일 인증 실패
 - 중복 닉네임
 - 이미 탈퇴한 사용자
+- 유효하지 않은 구글 ID Token
+- 구글 서버 응답 실패/시간 초과
 
 ---
 
 # 추후 개발 예정
 
-- Google OAuth2 로그인
+- LOCAL/GOOGLE 계정 연동 (같은 이메일의 두 계정을 하나로 합치는 기능)
 - Kakao 로그인
 - Naver 로그인
 - 2차 인증(MFA)
