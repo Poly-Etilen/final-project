@@ -136,7 +136,7 @@ Search/LLM을 거쳐도 항상 같은 값이 나오는 문제가 있었습니다
 
 실제 하드웨어 식별자인 `device_eui`를 기준으로 센서를 관리하는 것이 자연스럽다고 판단해, 결정 사항 10번에서 옮긴 `sensor` 테이블의 필드 구조 자체를 다시 정리했습니다.
 
-- `sensor` 테이블의 PK가 자동 생성 `id`(BIGSERIAL)에서 사용자가 등록 시 직접 입력하는 `device_eui`(INT)로 바뀌었습니다.
+- `sensor` 테이블의 PK가 자동 생성 `id`(BIGSERIAL)에서 사용자가 등록 시 직접 입력하는 `device_eui`(INT)로 바뀌었습니다. (이후 결정 사항 18번에서 `VARCHAR(32)`로 다시 수정되었습니다.)
 - 센서 등록 시 입력 필드가 `device_eui`, `place`, `location`, `device_model`, `sensor_type`으로 정리되었습니다. 기존의 `sensor_uuid`, `name`, `installed_at`, `datasource_id` 컬럼은 제거되었습니다.
 - 위치 정보(`place`/`location`)가 센서 레코드에 직접 저장되면서, 별도로 위치를 그룹핑하던 **"데이터 소스"(datasource) 엔티티 자체가 필요 없어져 완전히 제거**되었습니다. DatasourceGenerator DB의 `datasource` 테이블과 그 REST API(`/api/v1/datasources`)가 모두 삭제되었고, 그 결과 DatasourceGenerator는 REST API를 전혀 제공하지 않는 서비스가 되었습니다(MQTT Publish + RabbitMQ Subscribe만 수행).
 - 센서의 유일한 실질 식별자가 `device_eui`가 되면서, 등록 API뿐 아니라 **측정 파이프라인 전체**(MQTT Payload, RabbitMQ의 `EnvironmentMeasuredEvent`/`SensorErrorEvent`, InfluxDB Tag)에서 기존에 쓰던 범용 필드명 `sensorId`를 `deviceEui`로 통일했습니다. (컬럼명은 DB에서는 `device_eui`(snake_case), JSON payload에서는 `deviceEui`(camelCase)를 사용하는 기존 컨벤션을 그대로 따릅니다.)
@@ -218,6 +218,22 @@ On/Off가 발생할 수 있었습니다. 이를 보완했습니다.
 - 재활성화는 새 엔드포인트 `POST /auth/login/reactivate`로 처리합니다. 인증번호를 검증하면 `status`를 `ACTIVE`로 되돌리고, 최초 로그인 시도에서 이미 끝난 비밀번호 검증을 다시 요구하지 않고 그대로 JWT를 발급합니다.
 - `POST /auth/login`은 `status = 'DELETED'`인 계정의 로그인도 거부하도록 명확히 했습니다(기존에는 이 분기가 문서에 없었습니다).
 - (자세한 내용은 [auth-db.md](./03_Database/auth-db.md), [auth.md](./01_Domain/auth.md), [auth-api.md](./02_API/auth-api.md), [login.md](./04_sequence/login.md), [withdraw.md](./04_sequence/withdraw.md) 참고)
+
+### 18. `device_eui` 타입을 `INT`에서 `VARCHAR(32)`로 바꿨다
+
+결정 사항 11번에서 `device_eui`를 `INT`로 정했었는데, 실제 실습실 장비(Milesight AM107)가
+MQTT로 보내는 페이로드를 확인해보니 `device_eui`가 `"24e124128c067999"`처럼 LoRaWAN 표준
+64비트 DevEUI를 16자리 hex 문자열로 표현한 값이었습니다. 앞자리 `0`이 의미를 가질 수 있고
+산술 연산이 필요 없는 순수 식별자라, 정수 타입이 아니라 문자열이 맞다고 판단했습니다.
+
+- `cultivation-db.md`의 `sensor.device_eui` DDL을 `INT NOT NULL PRIMARY KEY`에서
+  `VARCHAR(32) NOT NULL PRIMARY KEY`로 바꿨습니다.
+- `sensor_cache`(DatasourceGenerator, 메모리)의 키 타입도 `Map<Integer, ...>`에서
+  `Map<String, ...>`로 바꿨습니다.
+- 이 변경은 문서 전반의 표기(DDL, API 요청/응답 예시, RabbitMQ 이벤트 예시, InfluxDB Tag 예시)에만
+  우선 반영했습니다. 실제 엔티티 코드(`Sensor.java`의 `id` 필드)는 아직 `Long`이며, 이번에는
+  건드리지 않기로 했습니다(문서 우선 반영, 코드 반영은 추후).
+- (자세한 내용은 [cultivation-db.md](./03_Database/cultivation-db.md), [cultivation-api.md](./02_API/cultivation-api.md), [cultivation.md](./01_Domain/cultivation.md), [datasource-generator-db.md](./03_Database/datasource-generator-db.md) 참고)
 
 ---
 

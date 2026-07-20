@@ -219,7 +219,7 @@ Redis에는 매번 저장하고, InfluxDB에는 재배별 10초 스로틀링을 
 ```json
 {
   "cultivationId": 3,
-  "deviceEui": 1,
+  "deviceEui": "24e124128c067999",
   "temperature": 22.4,
   "humidity": 88.1,
   "co2": 1050,

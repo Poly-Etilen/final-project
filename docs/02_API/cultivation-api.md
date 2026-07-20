@@ -38,7 +38,7 @@ Bearer JWT
     "mushroomType": "OYSTER",
     "devices": [
         {
-            "deviceEui": 4,
+            "deviceEui": "24e124128c067999",
             "place": "1동 A구역",
             "location": "선반 2단",
             "deviceModel": "DHT22",
@@ -100,7 +100,7 @@ AI Service를 호출하지 않고, Cultivation Service가 자체 보유한 참�
     },
     "description": "느타리버섯은 서늘하고 다습한 환경에서 균사 활착이 빠릅니다.",
     "registeredSensors": [
-        { "deviceEui": 4, "message": "센서가 등록되었습니다." }
+        { "deviceEui": "24e124128c067999", "message": "센서가 등록되었습니다." }
     ]
 }
 ```
@@ -270,7 +270,7 @@ RabbitMQ로 EnvironmentRangeUpdatedEvent를 발행합니다. (Rule Engine Servic
 
 ```json
 {
-    "deviceEui": 4,
+    "deviceEui": "24e124128c067999",
     "place": "1동 A구역",
     "location": "선반 2단",
     "deviceModel": "DHT22",
@@ -279,6 +279,7 @@ RabbitMQ로 EnvironmentRangeUpdatedEvent를 발행합니다. (Rule Engine Servic
 ```
 
 `deviceEui`는 장치 고유 식별자이며 그대로 PK로 사용됩니다(서버가 별도로 채번하지 않음).
+LoRaWAN 표준 64비트 DevEUI를 16자리 hex 문자열로 표현한 값이라 문자열(`VARCHAR`)입니다.
 
 ---
 
@@ -286,7 +287,7 @@ RabbitMQ로 EnvironmentRangeUpdatedEvent를 발행합니다. (Rule Engine Servic
 
 ```json
 {
-    "deviceEui": 4,
+    "deviceEui": "24e124128c067999",
     "message": "센서가 등록되었습니다."
 }
 ```
@@ -304,7 +305,7 @@ sensor_cache 갱신용)
 
 ```json
 [
-    { "deviceEui": 4, "place": "1동 A구역", "location": "선반 2단", "deviceModel": "DHT22", "sensorType": "TEMPERATURE", "status": "ONLINE" }
+    { "deviceEui": "24e124128c067999", "place": "1동 A구역", "location": "선반 2단", "deviceModel": "DHT22", "sensorType": "TEMPERATURE", "status": "ONLINE" }
 ]
 ```
 
@@ -318,7 +319,7 @@ sensor_cache 갱신용)
 
 ```json
 {
-    "deviceEui": 4,
+    "deviceEui": "24e124128c067999",
     "place": "1동 A구역",
     "location": "선반 2단",
     "deviceModel": "DHT22",
@@ -422,7 +423,7 @@ sensor_cache 갱신용)
 
 ```json
 [
-    { "deviceEui": 4, "cultivationId": 3, "sensorType": "TEMPERATURE" }
+    { "deviceEui": "24e124128c067999", "cultivationId": 3, "sensorType": "TEMPERATURE" }
 ]
 ```
 

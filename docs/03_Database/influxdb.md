@@ -77,7 +77,7 @@ environment
 Tag
 
 cultivationId = 3
-deviceEui = 1
+deviceEui = 24e124128c067999
 
 Field
 

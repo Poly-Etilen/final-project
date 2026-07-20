@@ -281,7 +281,7 @@ sensor/+
 
 ```json
 {
-  "deviceEui": 1,
+  "deviceEui": "24e124128c067999",
   "temperature": 22.4,
   "humidity": 88.1,
   "co2": 1050,
@@ -333,7 +333,7 @@ Cultivation Service가 environment_setting을 생성/수정할 때 발행합니�
 ```json
 {
   "cultivationId": 3,
-  "deviceEui": 1,
+  "deviceEui": "24e124128c067999",
   "temperature": 22.4,
   "humidity": 88.1,
   "co2": 1050,

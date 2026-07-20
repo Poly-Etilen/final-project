@@ -107,7 +107,7 @@ Rule Engine Service — 위험값(min/max) 이탈 시 장치 제어, 중앙값 �
     "name":"느타리 1호기",
     "mushroomType":"OYSTER",
     "devices":[
-        { "deviceEui": 4, "place": "1동 A구역", "location": "선반 2단", "deviceModel": "DHT22", "sensorType": "TEMPERATURE" }
+        { "deviceEui": "24e124128c067999", "place": "1동 A구역", "location": "선반 2단", "deviceModel": "DHT22", "sensorType": "TEMPERATURE" }
     ]
 }
 ```
@@ -179,7 +179,7 @@ Client
     },
     "description": "느타리버섯은 서늘하고 다습한 환경에서 균사 활착이 빠릅니다.",
     "registeredSensors": [
-        { "deviceEui": 4, "message": "센서가 등록되었습니다." }
+        { "deviceEui": "24e124128c067999", "message": "센서가 등록되었습니다." }
     ]
 }
 ```

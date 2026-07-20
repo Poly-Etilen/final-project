@@ -452,7 +452,7 @@ environment_setting을 생성/수정(저장)할 때 발행합니다. 단일 목�
 
 ```json
 {
-    "deviceEui": 4,
+    "deviceEui": "24e124128c067999",
     "cultivationId": 3,
     "sensorType": "TEMPERATURE",
     "registeredAt": "2026-08-15T09:00:00"
@@ -472,7 +472,7 @@ place/location/deviceModel은 이벤트에 담지 않습니다(필요하면 Cult
 
 ```json
 {
-    "deviceEui": 4,
+    "deviceEui": "24e124128c067999",
     "cultivationId": 3,
     "deletedAt": "2026-08-15T09:00:00"
 }

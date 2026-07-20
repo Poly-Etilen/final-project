@@ -236,7 +236,7 @@ Rule Engine Service는 두 종류의 이벤트를 발행합니다.
 ```json
 {
     "cultivationId":3,
-    "deviceEui":1,
+    "deviceEui":"24e124128c067999",
     "temperature":20.5,
     "humidity":82,
     "co2":980,

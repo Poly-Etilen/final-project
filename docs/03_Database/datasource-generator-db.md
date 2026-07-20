@@ -19,7 +19,10 @@ Service로 전달될 뿐입니다.
 > ℹ️ **변경 이력**: 위 두 변경 이후 이 DB에는 `sensor_cache` 테이블 하나만 남았는데,
 > device_eui/cultivationId/sensorType 세 값만 갖는 단순 조회용 캐시라 조인·트랜잭션이
 > 필요 없었습니다. 이런 용도로 PostgreSQL(관계형 DB)을 유지하는 것이 과하다고 판단해,
-> **DB 자체를 없애고 메모리(In-Memory, 예: ConcurrentHashMap)로 전환**했습니다. 이 문서는
+> **DB 자체를 없애고 메모리(In-Memory, 예: ConcurrentHashMap)로 전환**했습니다.
+> `device_eui`는 정수가 아니라 LoRaWAN 64비트 DevEUI를 16자리 hex 문자열로 표현한 값이라
+> `Map` 키 타입도 `String`입니다(자세한 내용은 [cultivation-db.md](./cultivation-db.md) 참고).
+> 이 문서는
 > 과거 테이블 설계를 참고할 수 있도록 유지하되, 실제로는 더 이상 PostgreSQL을 사용하지
 > 않습니다.
 
@@ -37,7 +40,7 @@ DatasourceGenerator가 "어떤 센서에 대해 MQTT 데이터를 생성/발행�
 ## 구조 (참고용, 실제 DDL 아님)
 
 ```
-Map<Integer, SensorCacheEntry>
+Map<String, SensorCacheEntry>
 
 SensorCacheEntry
 ──────────────────────────────────────────────

@@ -148,7 +148,7 @@ sensor/{deviceEui}
 
 ```json
 {
-  "deviceEui": 1,
+  "deviceEui": "24e124128c067999",
   "temperature": 21.8,
   "humidity": 92.4,
   "co2": 760,

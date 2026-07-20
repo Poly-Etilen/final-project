@@ -123,7 +123,7 @@ EnvironmentMeasuredEvent를 발행합니다.
 ```json
 {
     "cultivationId":3,
-    "deviceEui":1,
+    "deviceEui":"24e124128c067999",
     "temperature":22.4,
     "humidity":91.5,
     "co2":810,

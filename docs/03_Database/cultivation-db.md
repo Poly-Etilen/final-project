@@ -35,6 +35,13 @@ Environment Setting이 생성됩니다. 이때 API로 주고받는 단일 목표
 > 않고 센서 레코드에 직접 저장합니다. 이에 따라 DatasourceGenerator DB의 `datasource`
 > 테이블도 함께 폐지되었습니다. (자세한 내용은 [datasource-generator-db.md](./datasource-generator-db.md) 참고)
 
+> ℹ️ **변경 이력**: `device_eui` 타입을 `INT`에서 `VARCHAR(32)`로 바꿨습니다. 실제
+> 실습실 장비(Milesight AM107)의 MQTT 페이로드를 확인해보니 `device_eui`가
+> `"24e124128c067999"`처럼 LoRaWAN 표준 64비트 DevEUI를 16자리 hex 문자열로 표현한
+> 값이었습니다. 앞자리 `0`이 의미를 가질 수 있고 산술 연산이 필요 없는 순수 식별자라 숫자
+> 타입보다 문자열이 맞습니다. 이 문서 전반의 `deviceEui` 예시도 `4` 같은 숫자 대신 실제
+> 형식에 맞는 hex 문자열로 갱신했습니다.
+
 > ℹ️ **변경 이력**: `mushroom_reference`에 이름(한글/영문/학명), 특성, 효능, 재배 가이드,
 > 추가 정보 컬럼이 추가되었습니다. 원래 이 데이터는 별도 `mushroom`이라는 테이블(PK
 > `mushroom_id`)로 논의되었지만, 버섯 종류당 정확히 한 행만 존재하는 정적 참조 데이터라는
@@ -273,7 +280,7 @@ Cultivation Service가 단일값을 범위로 변환해 저장합니다. 아래 
 
 | Column | Type | Description |
 |---------|------|-------------|
-| device_eui | INT | PK, 장치 고유 식별자 (하드웨어 EUI) |
+| device_eui | VARCHAR(32) | PK, 장치 고유 식별자 (LoRaWAN DevEUI, 16자리 hex 문자열) |
 | cultivation_id | BIGINT | 재배 (FK, 같은 DB 내 실제 외래키) |
 | place | VARCHAR(50) | 설치 장소 (예: 1동 A구역) |
 | location | VARCHAR(50) | 세부 위치 |
@@ -484,7 +491,7 @@ CREATE TABLE photo (
 ```sql
 CREATE TABLE sensor (
 
-    device_eui INT NOT NULL PRIMARY KEY,
+    device_eui VARCHAR(32) NOT NULL PRIMARY KEY,
 
     cultivation_id BIGINT NOT NULL,
 
