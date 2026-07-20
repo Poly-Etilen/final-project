@@ -26,6 +26,12 @@ AI Service는 LLM과 RAG(Retrieval-Augmented Generation)를 활용하여 사용�
 > 않는 이유는, 공공데이터 원문이 항목별로 파편화되어 있어 사용자에게는 자연어로 통합된 설명이
 > 더 읽기 좋기 때문입니다.
 
+> ℹ️ **변경 이력**: AI 챗봇의 대화 이력을 조회하는 기능이 추가되었습니다. 기존에는 `ai:{hash}`
+> Redis 캐시(동일 질문 재요청 시 LLM 재호출 방지용)만 있어서 사용자가 이전 대화를 다시 볼 수
+> 없었습니다. 이번 변경으로 매 질의응답을 `chat_message` 테이블에 저장하며, AI Service가
+> 처음으로 PostgreSQL DB를 갖게 되었습니다. `ai:{hash}` 캐시는 역할이 겹치지 않아 그대로
+> 유지합니다. (자세한 내용은 [ai-db.md](../03_Database/ai-db.md) 참고)
+
 ---
 
 # 책임
@@ -151,6 +157,14 @@ AI에서 뺀 이유와 같은 문제이지만, 이번에는 수치가 아닌 "�
 - 언제 수확하면 좋을까요?
 - 생산량을 늘리려면 어떻게 해야 하나요?
 
+매 질의응답은 `chat_message` 테이블에 저장됩니다.
+
+---
+
+## AI 챗봇 대화 이력 조회
+
+특정 재배에 대해 사용자가 챗봇과 나눈 이전 질문/답변을 최신순으로 조회합니다.
+
 ---
 
 ## AI 리포트
@@ -189,6 +203,12 @@ POST /ai/chat
 
 ---
 
+## AI 챗봇 대화 이력 조회
+
+GET /ai/chat/history
+
+---
+
 ## AI 리포트 생성
 
 POST /ai/report
@@ -197,7 +217,13 @@ POST /ai/report
 
 # Database
 
-AI Service는 별도의 관계형 데이터베이스를 사용하지 않습니다.
+AI Service는 하나의 PostgreSQL Database를 사용합니다.
+
+### Table
+
+- chat_message (챗봇 대화 이력)
+
+자세한 내용은 [ai-db.md](../03_Database/ai-db.md) 참고.
 
 ---
 
@@ -315,6 +341,50 @@ Client
 
 ---
 
+## AI 챗봇
+
+Client
+
+↓
+
+AI Service
+
+↓
+
+Redis 캐시 조회 (ai:{hash})
+
+↓
+
+Cache Miss → Sensor Service 조회 + Embedding Service 유사 사례 검색(선택) → LLM
+
+↓
+
+chat_message 저장 (PostgreSQL)
+
+↓
+
+Client
+
+---
+
+## AI 챗봇 대화 이력 조회
+
+Client
+
+↓
+
+AI Service
+
+↓
+
+chat_message 조회 (cultivation_id, 최신순)
+
+↓
+
+Client
+
+---
+
 ## AI 리포트 생성
 
 Scheduler
@@ -351,6 +421,8 @@ Client
 - LLM 응답 실패 (버섯 가이드 생성 실패 포함)
 - 버섯 가이드 생성 시 Cultivation Service 호출 실패 (RAG 컨텍스트 조회 실패)
 - Redis Cache 조회 실패
+- chat_message 저장 실패 (PostgreSQL) — 저장에 실패해도 챗봇 응답 자체는 사용자에게 반환합니다
+- 다른 사용자의 재배에 대한 대화 이력 조회 시도
 - Sensor 데이터 부족
 - 등록된 사진 없음
 - Vision 모델 분석 실패

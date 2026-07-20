@@ -21,6 +21,8 @@ Spring Boot 4.0.7이 관리하는 BOM(Bill of Materials) 버전을 그대로 따
 - 사용자 정보
 - 재배 정보
 - 센서 장치 정보
+- 알림 이력
+- 챗봇 대화 이력
 
 ### Redis
 

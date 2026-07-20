@@ -28,7 +28,8 @@ Rule Engine Service와 Sensor Service는 RabbitMQ(EnvironmentMeasuredEvent)로�
 
 - Auth (users 단일 테이블)
 - Cultivation
-- DatasourceGenerator
+- Notification (알림 이력)
+- AI (챗봇 대화 이력)
 
 ---
 

@@ -6,7 +6,7 @@
 
 | Database | 용도 | 사용 서비스 |
 |----------|------|------------|
-| PostgreSQL | 관계형 데이터 저장 | Auth, Cultivation |
+| PostgreSQL | 관계형 데이터 저장 | Auth, Cultivation, Notification, AI |
 | Redis | 캐시 및 임시 데이터 | Auth, AI, Rule Engine, Sensor |
 | InfluxDB | 시계열 센서 데이터 | Sensor |
 | Elasticsearch | Vector Search | Embedding |
@@ -46,6 +46,36 @@ AI/Embedding 호출 없이 추천값을 보여줍니다. 참조 데이터의 텍
 - harvest
 - photo
 - sensor (센서 장치 메타데이터, 기존 DatasourceGenerator DB에서 이전)
+
+---
+
+## Notification DB
+
+### 목적
+
+발송한 알림의 이력(목록 조회/읽음 처리용)을 관리합니다. 채널 발송(WebSocket/Telegram/
+Discord) 자체는 여전히 RabbitMQ 이벤트 기반 비동기 처리이며, DB는 그 결과만 저장합니다.
+
+### Table
+
+- notification
+
+자세한 내용은 [notification-db.md](./notification-db.md) 참고.
+
+---
+
+## AI DB
+
+### 목적
+
+AI 챗봇의 대화 이력(질문/답변)을 관리합니다. `ai:{hash}` Redis 캐시(동일 질문 재요청 시
+LLM 재호출 방지)와는 역할이 다릅니다 — 캐시는 성능 최적화용, 이 DB는 대화 이력 조회용입니다.
+
+### Table
+
+- chat_message
+
+자세한 내용은 [ai-db.md](./ai-db.md) 참고.
 
 ---
 
@@ -226,11 +256,11 @@ mushroom-photos
 |----------|------------|--------|-----------|---------------|-------|
 | Auth | O | O | X | X | X |
 | Cultivation | O | X | X | X | O |
-| AI | X | O | X | X | O |
+| AI | O | O | X | X | O |
 | Embedding | X | X | X | O | X |
 | Rule Engine | X | O | X | X | X |
 | Sensor | X | O | O | X | X |
-| Notification | X | X | X | X | X |
+| Notification | O | X | X | X | X |
 | DatasourceGenerator | X | X | X | X | X |
 
 Auth(구 Auth+User)는 서비스 통합으로 테이블이 하나로 줄었습니다.
@@ -239,6 +269,8 @@ Rule Engine Service는 PostgreSQL/InfluxDB 같은 영구 저장소가 없으며,
 Sensor Service는 Rule Engine Service가 RabbitMQ로 전달한 데이터를 Redis/InfluxDB에 저장합니다.
 (한때 Rule Engine과 Sensor를 하나로 통합했었지만, 저장·조회 책임의 크기가 달라 다시 분리했습니다.)
 DatasourceGenerator는 어떤 영구 저장소도 사용하지 않으며, `sensor_cache`는 메모리(In-Memory)에서만 관리합니다.
+AI Service와 Notification Service는 각각 챗봇 대화 이력(`chat_message`)과 알림 이력(`notification`)
+조회 기능이 추가되면서 처음으로 PostgreSQL을 갖게 되었습니다.
 
 ---
 

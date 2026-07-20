@@ -39,11 +39,11 @@ API Gateway를 포함해 9개 서비스로 구성됩니다. (기존 9개 서비�
 | API Gateway | 라우팅, 인증 토큰 검증 | - | - | - | 전체 시퀀스 최초 진입점 |
 | Auth | 인증/인가(이메일+구글 소셜 로그인), JWT, 이메일 인증, 회원 프로필/탈퇴/재배 통계 (기존 Auth+User 통합) | [auth.md](./01_Domain/auth.md) | [auth-api.md](./02_API/auth-api.md) | [auth-db.md](./03_Database/auth-db.md) | [signup](./04_sequence/signup.md), [login](./04_sequence/login.md), [withdraw](./04_sequence/withdraw.md) |
 | Cultivation | 재배 생성/관리/수확/사진 업로드, 공공데이터 기반 환경 추천(`mushroom_reference` 조회), 센서 장치 등록/조회/삭제(재배 생성과 동시 등록 가능) | [cultivation.md](./01_Domain/cultivation.md) | [cultivation-api.md](./02_API/cultivation-api.md) | [cultivation-db.md](./03_Database/cultivation-db.md) | [create-cultivation](./04_sequence/create-cultivation.md), [harvest](./04_sequence/harvest.md), [growth-analysis](./04_sequence/growth-analysis.md), [sensor-error](./04_sequence/sensor-error.md) |
-| AI | 생육 분석(Vision), 챗봇, 리포트, 버섯 가이드(효능/주의사항) | [ai.md](./01_Domain/ai.md) | [ai-api.md](./02_API/ai-api.md) | Redis(캐시), MinIO(읽기 전용) | [create-cultivation](./04_sequence/create-cultivation.md), [growth-analysis](./04_sequence/growth-analysis.md), [harvest](./04_sequence/harvest.md), [ai-chat](./04_sequence/ai-chat.md), [ai-report](./04_sequence/ai-report.md) |
+| AI | 생육 분석(Vision), 챗봇(대화 이력 저장/조회), 리포트, 버섯 가이드(효능/주의사항) | [ai.md](./01_Domain/ai.md) | [ai-api.md](./02_API/ai-api.md) | [ai-db.md](./03_Database/ai-db.md), Redis(캐시), MinIO(읽기 전용) | [create-cultivation](./04_sequence/create-cultivation.md), [growth-analysis](./04_sequence/growth-analysis.md), [harvest](./04_sequence/harvest.md), [ai-chat](./04_sequence/ai-chat.md), [ai-report](./04_sequence/ai-report.md) |
 | Embedding | 재배 참조 데이터 임베딩·벡터 검색 (AI 챗봇 유사 사례 검색용) | [embedding.md](./01_Domain/embedding.md) | [embedding-api.md](./02_API/embedding-api.md) | [elasticSearch.md](./03_Database/elasticSearch.md) | [ai-chat](./04_sequence/ai-chat.md) |
 | Rule Engine | MQTT 수신(Collector), 검증, 규칙 평가/자동 제어, 센서 오류 감지 | [rule-Engine.md](./01_Domain/rule-Engine.md) | API 없음 (MQTT/RabbitMQ 기반, [rule-engine-api.md](./02_API/rule-engine-api.md) 참고) | Redis(목표 환경 범위 캐시만, 영구 저장소 없음) | [sensor-data](./04_sequence/sensor-data.md), [environment-control](./04_sequence/environment-control.md), [sensor-error](./04_sequence/sensor-error.md) |
 | Sensor | 측정값 저장(Redis/InfluxDB)·조회·통계·주간월간 리포트 집계 | [sensor.md](./01_Domain/sensor.md) | [sensor-api.md](./02_API/sensor-api.md) | [influxdb.md](./03_Database/influxdb.md), [redis.md](./03_Database/redis.md) | [sensor-data](./04_sequence/sensor-data.md), [environment-control](./04_sequence/environment-control.md) |
-| Notification | WebSocket/Telegram/Discord 알림 | [notification.md](./01_Domain/notification.md) | API 없음 (RabbitMQ 기반) | 없음 | [environment-control](./04_sequence/environment-control.md), [harvest](./04_sequence/harvest.md), [sensor-error](./04_sequence/sensor-error.md) |
+| Notification | WebSocket/Telegram/Discord 알림, 알림 이력 조회/읽음 처리 | [notification.md](./01_Domain/notification.md) | [notification-api.md](./02_API/notification-api.md) (알림 발송 자체는 RabbitMQ 기반) | [notification-db.md](./03_Database/notification-db.md) | [environment-control](./04_sequence/environment-control.md), [harvest](./04_sequence/harvest.md), [sensor-error](./04_sequence/sensor-error.md) |
 | DatasourceGenerator | 센서 데이터 생성/발행 (MQTT Publish 전용, REST API 없음, 기존 Datasource Service 리네임) | [datasource-generator.md](./01_Domain/datasource-generator.md) | API 없음 ([datasource-generator-api.md](./02_API/datasource-generator-api.md) 참고) | DB 없음, 메모리 캐시만 사용 ([datasource-generator-db.md](./03_Database/datasource-generator-db.md) 참고) | [sensor-data](./04_sequence/sensor-data.md) |
 
 DB 전체 그림은 [database-overview.md](./03_Database/database-overview.md)에서 한 번에 볼 수 있습니다.
@@ -234,6 +234,19 @@ MQTT로 보내는 페이로드를 확인해보니 `device_eui`가 `"24e124128c06
   우선 반영했습니다. 실제 엔티티 코드(`Sensor.java`의 `id` 필드)는 아직 `Long`이며, 이번에는
   건드리지 않기로 했습니다(문서 우선 반영, 코드 반영은 추후).
 - (자세한 내용은 [cultivation-db.md](./03_Database/cultivation-db.md), [cultivation-api.md](./02_API/cultivation-api.md), [cultivation.md](./01_Domain/cultivation.md), [datasource-generator-db.md](./03_Database/datasource-generator-db.md) 참고)
+
+### 19. Notification Service와 AI Service에 각각 PostgreSQL DB를 신설했다 (`notification`, `chat_message`)
+
+전체 DB/테이블 구성을 다시 점검하면서, "테이블 개수가 너무 적은 것 아니냐"는 의견이 있었습니다.
+검토해보니 실제로 두 곳이 비어 있었습니다. Notification Service는 알림을 발송만 하고 기록을
+남기지 않아 사용자가 지난 알림을 다시 볼 방법이 없었고, AI 챗봇도 `ai:{hash}` 응답 캐시만
+있을 뿐 대화 이력을 조회할 방법이 없었습니다.
+
+- Notification Service에 `notification` 테이블(`id`, `user_id`, `type`, `message`, `is_read`, `created_at`)을 추가했습니다. `type`은 기존에 구독하던 6개 RabbitMQ 이벤트와 1:1로 대응합니다. 알림 목록 조회(`GET /notifications`)/읽음 처리(`PATCH /notifications/{id}/read`, `PATCH /notifications/read-all`) API가 함께 추가되면서, Notification Service가 처음으로 REST API와 PostgreSQL DB를 갖게 되었습니다.
+- AI Service에 `chat_message` 테이블(`id`, `user_id`, `cultivation_id`, `message`, `answer`, `created_at`)을 추가했습니다. `POST /ai/chat`이 매 질의응답을 이 테이블에 저장하며, 새로 추가된 `GET /ai/chat/history`로 재배별 대화 이력을 조회할 수 있습니다. 기존 `ai:{hash}` Redis 캐시(동일 질문 재요청 시 LLM 재호출 방지용)는 역할이 겹치지 않아 그대로 유지됩니다. AI Service가 처음으로 PostgreSQL DB를 갖게 되었습니다.
+- 두 서비스 모두 기존 Auth DB/Cultivation DB에 얹지 않고 완전히 독립된 새 DB로 만들었습니다("서비스마다 자기 DB만 소유한다"는 기존 원칙을 그대로 유지).
+- 테이블/컬럼 설계 과정에서 `harvest.cultivation_id UNIQUE`(재배당 수확 1회만 허용) 제약이 실제 버섯 재배(여러 번 수확하는 "플러시")와 맞지 않을 수 있다는 점도 별도로 논의되었으나, 이번 변경 범위에는 포함하지 않았습니다(추후 검토 필요).
+- (자세한 내용은 [notification-db.md](./03_Database/notification-db.md), [notification-api.md](./02_API/notification-api.md), [notification.md](./01_Domain/notification.md), [ai-db.md](./03_Database/ai-db.md), [ai-api.md](./02_API/ai-api.md), [ai.md](./01_Domain/ai.md), [database-overview.md](./03_Database/database-overview.md) 참고)
 
 ---
 

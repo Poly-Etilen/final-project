@@ -34,6 +34,12 @@ Bearer JWT
 > (`GET /api/v1/mushroom-references/{mushroomType}`) 이 원문을 RAG 컨텍스트로 가져온 뒤
 > LLM에 전달합니다. LLM은 원문을 그대로 반환하지 않고 자연스러운 문장으로 재구성합니다.
 
+> ℹ️ **변경 이력**: `GET /chat/history`가 새로 추가되었습니다. `POST /chat`이 매 질의응답을
+> `chat_message` 테이블(PostgreSQL)에 저장하며, 이 엔드포인트로 이전 대화를 조회할 수
+> 있습니다. AI Service가 처음으로 PostgreSQL DB를 갖게 되었습니다. 기존 `ai:{hash}`
+> Redis 캐시(동일 질문 재요청 시 LLM 재호출 방지용)는 역할이 겹치지 않아 그대로 유지됩니다.
+> (자세한 내용은 [ai-db.md](../03_Database/ai-db.md) 참고)
+
 ---
 
 # 생육 분석 (Vision)
@@ -189,6 +195,10 @@ Cache Miss 시 Sensor Service 조회 + Embedding Service 유사 사례 검색 (�
 
 LLM
 
+↓
+
+chat_message 저장 (user_id, cultivationId, message, answer)
+
 ---
 
 ### Response
@@ -196,6 +206,51 @@ LLM
 ```json
 {
     "answer": "현재 습도가 목표보다 5% 낮은 상태가 지속되고 있어 생육 속도가 느려졌을 수 있습니다. 가습기 가동 주기를 조금 더 짧게 설정하는 것을 권장합니다."
+}
+```
+
+Redis 캐시 히트 여부와 무관하게, 매 요청은 `chat_message`에 새 행으로 저장됩니다(캐시된
+응답이라도 "언제 다시 물어봤는지"는 별도 이력이므로).
+
+---
+
+# AI 챗봇 대화 이력 조회
+
+## GET /chat/history
+
+특정 재배에 대해 로그인한 사용자가 챗봇과 나눈 이전 질문/답변을 최신순으로 조회합니다.
+
+### Query Parameter
+
+| 이름 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| cultivationId | long | O | 조회할 재배 ID |
+| page | int | X | 페이지 번호 (기본값 0) |
+| size | int | X | 페이지 크기 (기본값 20) |
+
+---
+
+### Process
+
+AI Service
+
+↓
+
+`chat_message` 조회 (cultivationId, 요청자 소유 검증, 최신순)
+
+---
+
+### Response
+
+```json
+{
+    "messages": [
+        {
+            "message": "왜 성장이 느린가요?",
+            "answer": "현재 습도가 목표보다 5% 낮은 상태가 지속되고 있어 생육 속도가 느려졌을 수 있습니다.",
+            "createdAt": "2026-08-15T13:30:00"
+        }
+    ]
 }
 ```
 
@@ -263,6 +318,8 @@ LLM
 | AI006 | Vision 모델 분석 실패 |
 | AI007 | API 호출 시간 초과 |
 | AI008 | 버섯 가이드 생성 실패 (LLM 응답 실패, Cultivation Service RAG 컨텍스트 조회 실패 포함) |
+| AI009 | chat_message 저장 실패 (PostgreSQL) |
+| AI010 | 다른 사용자의 재배에 대한 대화 이력 조회 시도 |
 
 ---
 

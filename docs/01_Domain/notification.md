@@ -7,6 +7,13 @@ Notification Service는 시스템에서 발생한 이벤트를 사용자에게 �
 RabbitMQ를 통해 이벤트를 수신하며,
 사용자가 설정한 알림 방식에 따라 WebSocket, Telegram, Discord로 알림을 전송합니다.
 
+> ℹ️ **변경 이력**: 발송한 알림을 `notification` 테이블에 저장하고, 목록 조회/읽음 처리
+> REST API를 제공하도록 확장되었습니다. 기존에는 채널 발송만 하고 기록을 남기지 않아
+> 사용자가 지난 알림을 다시 볼 방법이 없었습니다. 이 변경으로 Notification Service가 처음으로
+> PostgreSQL DB를 갖게 되었습니다. (자세한 내용은
+> [notification-db.md](../03_Database/notification-db.md),
+> [notification-api.md](../02_API/notification-api.md) 참고)
+
 ---
 
 # 책임
@@ -81,17 +88,51 @@ AI 생육 분석(Vision)은 사용자가 사진을 업로드하면 그 자리에
 
 ---
 
+## 알림 목록 조회
+
+로그인한 사용자가 받은 알림을 최신순으로 조회합니다. 읽지 않은 알림만 필터링할 수 있습니다.
+
+---
+
+## 알림 읽음 처리
+
+특정 알림, 또는 전체 알림을 읽음 상태로 변경합니다.
+
+---
+
 # API
 
-Notification Service는 외부 API를 제공하지 않습니다.
+채널 발송(WebSocket/Telegram/Discord)은 RabbitMQ 이벤트 기반으로 동작하며 REST API가
+없지만, 알림 이력 조회/읽음 처리는 REST API로 제공합니다.
 
-RabbitMQ 이벤트를 기반으로 동작합니다.
+## 알림 목록 조회
+
+GET /notifications
+
+---
+
+## 알림 읽음 처리
+
+PATCH /notifications/{notificationId}/read
+
+---
+
+## 전체 읽음 처리
+
+PATCH /notifications/read-all
 
 ---
 
 # Database
 
-별도의 Database를 사용하지 않습니다.
+Notification Service는 하나의 PostgreSQL Database를 사용합니다.
+
+### Table
+
+- notification (발송한 알림 이력)
+
+발송 자체는 여전히 RabbitMQ 이벤트 기반 비동기 처리이며, DB는 그 결과(이력)만 저장합니다.
+자세한 내용은 [notification-db.md](../03_Database/notification-db.md) 참고.
 
 ---
 
@@ -122,6 +163,12 @@ Discord 메시지 전송
 ### RabbitMQ
 
 이벤트 수신
+
+---
+
+### API Gateway
+
+알림 목록 조회/읽음 처리 REST API 요청
 
 ---
 
@@ -217,6 +264,8 @@ Cooling Fan ON
 
 # Sequence
 
+## 알림 발송
+
 Rule Engine
 
 ↓
@@ -226,6 +275,10 @@ RabbitMQ
 ↓
 
 Notification Service
+
+↓
+
+notification 저장 (PostgreSQL)
 
 ↓
 
@@ -241,6 +294,30 @@ Notification Service
 
 사용자
 
+채널 발송 성공/실패와 무관하게 이력 저장은 먼저 시도합니다.
+
+---
+
+## 알림 목록 조회
+
+Client
+
+↓
+
+API Gateway
+
+↓
+
+Notification Service
+
+↓
+
+notification 조회 (user_id, 최신순)
+
+↓
+
+Client
+
 ---
 
 # 예외 상황
@@ -249,6 +326,9 @@ Notification Service
 - Discord Webhook 실패
 - WebSocket 연결 종료
 - RabbitMQ 연결 실패
+- notification 저장 실패 (PostgreSQL)
+- 존재하지 않는 알림 조회/읽음 처리 시도
+- 다른 사용자의 알림에 대한 읽음 처리 시도
 
 ---
 
