@@ -12,6 +12,10 @@ Refresh Token은 Redis에 저장하여 관리합니다.
 > ℹ️ **변경 이력**: 이메일/비밀번호(LOCAL) 로그인 외에 구글 소셜 로그인(GOOGLE)이
 > 추가되었습니다. 아래는 LOCAL 로그인 흐름이며, 구글 로그인은 "구글 로그인" 섹션을 참고하세요.
 
+> ℹ️ **변경 이력**: 휴면 계정(DORMANT) 판단이 추가되었습니다. 비밀번호 검증에 성공해도
+> `last_login_at` 기준으로 장기 미로그인이면 즉시 로그인시키지 않고, `status`를 `DORMANT`로
+> 전환한 뒤 이메일 재인증을 요구합니다. 자세한 흐름은 "휴면 계정 판단 및 재활성화" 섹션 참고.
+
 ---
 
 # Sequence
@@ -42,6 +46,10 @@ PostgreSQL
 ↓
 
 BCrypt
+
+↓
+
+status 판단 (DELETED면 거부, 휴면 기준 초과면 DORMANT 전환+인증번호 발송)
 
 ↓
 
@@ -94,6 +102,10 @@ users
 
 사용자 존재 여부 확인
 
+↓
+
+`status = 'DELETED'`이면 A010 오류로 로그인을 거부합니다(탈퇴한 계정).
+
 ---
 
 ## 3. 비밀번호 검증
@@ -110,11 +122,30 @@ PasswordEncoder.matches()
 
 ↓
 
-JWT 생성
+상태 판단
 
 ---
 
-## 4. JWT 생성
+## 4. 상태 판단 (휴면 계정 처리)
+
+```
+status = 'ACTIVE' AND (지금 - last_login_at) <= 90일
+→ 정상 로그인 진행 (다음 단계로)
+
+status = 'DORMANT' 이거나
+status = 'ACTIVE' AND (지금 - last_login_at) > 90일
+→ status를 'DORMANT'로 전환, 이메일 인증번호 발송(Redis, TTL 5분), 여기서 응답 종료
+   (JWT는 발급하지 않음. 이후 흐름은 "휴면 계정 판단 및 재활성화" 섹션 참고)
+```
+
+최초 가입 후 한 번도 로그인하지 않아 `last_login_at`이 NULL이면 휴면 판단에서 제외하고
+정상 로그인으로 진행합니다.
+
+정상 로그인으로 판단되면 `last_login_at`을 현재 시각으로 갱신합니다.
+
+---
+
+## 5. JWT 생성
 
 생성 항목
 
@@ -143,7 +174,7 @@ JWT 생성
 
 ---
 
-## 5. Refresh Token 저장
+## 6. Refresh Token 저장
 
 Redis
 
@@ -167,7 +198,7 @@ TTL
 
 ---
 
-## 6. 응답
+## 7. 응답
 
 Client에게
 
@@ -301,6 +332,81 @@ Client
 
 ---
 
+# 휴면 계정 판단 및 재활성화
+
+```
+Client (로그인 요청, 비밀번호 검증 성공)
+
+↓
+
+Auth Service
+
+↓
+
+last_login_at 확인
+
+├── NULL 이거나 90일 이내 → 정상 로그인 (JWT 발급)
+└── 90일 초과 (또는 이미 DORMANT) → 아래로
+
+↓
+
+status = 'DORMANT'로 전환
+
+↓
+
+인증번호 생성 → Redis 저장 (email:{email}, TTL 5분)
+
+↓
+
+SMTP 발송
+
+↓
+
+Client에게 { reactivationRequired: true } 응답 (토큰 없음)
+
+
+─────────────────────────────────────
+
+
+Client (인증번호 입력)
+
+↓
+
+POST /auth/login/reactivate
+
+↓
+
+Auth Service
+
+↓
+
+Redis에서 인증번호 검증
+
+↓
+
+status를 'ACTIVE'로 전환, last_login_at 갱신
+
+↓
+
+JWT 생성 (Access Token + Refresh Token)
+
+↓
+
+Redis 저장 (refresh:{userId})
+
+↓
+
+Client
+```
+
+재활성화 단계에서는 비밀번호를 다시 검증하지 않습니다. 최초 `POST /auth/login` 요청에서
+이미 검증되었기 때문입니다. 인증번호 생성/검증 방식은 회원가입 이메일 인증과 동일한 메커니즘을
+재사용합니다(같은 Redis 키 형식, TTL 5분).
+
+휴면 기준일(90일)은 정책값이며 운영 중 조정될 수 있습니다.
+
+---
+
 # 사용 Database
 
 ## PostgreSQL
@@ -347,6 +453,9 @@ refresh:{userId}
 - JWT 생성 실패
 - 유효하지 않은 구글 ID Token (구글 로그인)
 - 구글 인증 서버 응답 실패/시간 초과 (구글 로그인)
+- 이미 탈퇴한 사용자 (`status = 'DELETED'`, 로그인 거부)
+- 휴면 계정 전환 (재인증 필요)
+- 재활성화 인증번호 불일치 또는 만료
 
 ---
 

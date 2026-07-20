@@ -192,7 +192,7 @@ On/Off가 발생할 수 있었습니다. 이를 보완했습니다.
 - Elasticsearch의 `mushroom_environment` 인덱스 스키마도 이 필드들을 반영하도록 확장했습니다.
 - (자세한 내용은 [cultivation-db.md](./03_Database/cultivation-db.md), [cultivation.md](./01_Domain/cultivation.md), [cultivation-api.md](./02_API/cultivation-api.md), [ai.md](./01_Domain/ai.md), [ai-api.md](./02_API/ai-api.md), [embedding.md](./01_Domain/embedding.md), [embedding-api.md](./02_API/embedding-api.md), [elasticSearch.md](./03_Database/elasticSearch.md) 참고)
 
-### 16. 구글 소셜 로그인을 추가하고, 회원 탈퇴 표현 방식을 `deleted_at`에서 `status`로 바꿨다
+### 16. 구글 소셜 로그인을 추가하고, 회원 탈퇴에 `status` 컬럼을 도입했다
 
 `users` 테이블 DDL을 다시 검토하던 중, "추후 개발 예정"에 있던 구글 OAuth2 로그인을 실제로
 추가하기로 하면서 스키마를 함께 정리했습니다.
@@ -200,9 +200,23 @@ On/Off가 발생할 수 있었습니다. 이를 보완했습니다.
 - `users`에 `provider`(LOCAL/GOOGLE) 컬럼이 추가되었습니다. `email` 단독 `UNIQUE` 대신 `(email, provider)` 조합 `UNIQUE`로 바뀌어, 같은 이메일이라도 LOCAL 계정과 GOOGLE 계정을 별도 행으로 허용합니다(두 계정을 하나로 합치는 계정 연동은 추후 개발 예정). `password`는 GOOGLE 계정에는 없으므로 NULL을 허용하며, `provider가 LOCAL이면 password가 NOT NULL`이라는 CHECK 제약을 추가했습니다.
 - `POST /auth/google`이 신설되었습니다. 프론트엔드가 구글 로그인으로 받은 ID Token을 전달하면 Auth Service가 구글 공개키로 검증하고, 최초 로그인이면 자동으로 회원가입까지 처리합니다(별도의 "구글 회원가입" API는 없음).
 - `role`(USER/ADMIN)은 그대로 유지했습니다. mushroom_reference 갱신, Embedding 관리 API 같은 관리자 전용 기능이 이미 이 값에 의존하고 있어서, provider/status 추가와는 별개로 남겨뒀습니다.
-- 회원 탈퇴 표현 방식이 `deleted_at`(NULL 여부로 판단하는 타임스탬프)에서 `status`(ACTIVE/DELETED) 컬럼으로 바뀌었습니다. 탈퇴 시각은 별도 컬럼 없이, 탈퇴 처리 시점에 함께 갱신되는 `updated_at`으로 확인합니다.
+- 회원 탈퇴 여부를 명시적으로 표현하기 위해 `status`(ACTIVE/DELETED) 컬럼을 도입했습니다. 처음에는 `status` 도입과 함께 기존 `deleted_at` 컬럼을 제거하려 했으나, 아래 결정 사항 17번에서 다시 검토되어 `deleted_at`을 복원했습니다.
 - `nickname`도 실제 `UNIQUE` 제약을 추가했습니다. 기존에는 인덱스만 있고 제약이 없었는데, 에러 코드 A009(중복 닉네임)가 이미 문서화되어 있던 것과 맞춰 정합성을 맞췄습니다.
 - (참고: 같은 시점에 검토한 `mushroom`/`environment_setting`/`cultivation`/`sensor`/`harvest` DDL 초안은 오래된 버전이었고, `mushroom_reference` 병합(결정 사항 15번)과 device_eui 기반 sensor 설계(결정 사항 10~11번) 등 기존 결정을 그대로 유지하기로 확인했습니다. 새 DDL 자체가 문서를 대체하지는 않았습니다.)
+- (자세한 내용은 [auth-db.md](./03_Database/auth-db.md), [auth.md](./01_Domain/auth.md), [auth-api.md](./02_API/auth-api.md), [login.md](./04_sequence/login.md), [withdraw.md](./04_sequence/withdraw.md) 참고)
+
+### 17. `deleted_at`을 복원하고, 휴면 계정(`DORMANT`) 상태를 추가했다
+
+결정 사항 16번에서 `status` 도입과 함께 `deleted_at`을 제거했는데, "탈퇴 취소(계정 복구) 기능을
+만들려면 정확한 탈퇴 시점이 필요한데 `status`만으로는 알 수 없지 않냐"는 지적이 있었습니다.
+`updated_at`으로 대체하는 방안도 검토했지만, `updated_at`은 탈퇴 이외의 이유로도 바뀌는 값이라
+신뢰할 수 없어 기각했습니다.
+
+- `users`에 `deleted_at`(nullable TIMESTAMP)을 복원했습니다. 탈퇴 여부 조회/필터링은 `status = 'DELETED'`로, 정확한 탈퇴 시각은 `deleted_at`으로 확인합니다. `CHECK ((status = 'DELETED') = (deleted_at IS NOT NULL))` 제약으로 두 컬럼이 항상 일치하도록 강제합니다. "탈퇴 취소" 기능 자체는 이번에 구현하지 않고 추후 개발 예정으로 남겨뒀습니다(스키마만 우선 반영).
+- 같은 논의 중에 `status`가 ACTIVE/DELETED 두 값만 가진다면 `deleted_at` 하나만으로도 표현이 가능해 두 컬럼이 중복 아니냐는 질문이 나왔는데, 이메일 인증은 회원가입 시 이미 필수라 "인증 대기" 상태는 없지만 장기 미로그인 계정을 위한 휴면(`DORMANT`) 상태를 추가하기로 하면서 `status`가 3개 값을 가지게 되어 `status`(상태 구분)와 `deleted_at`(탈퇴 시각)을 함께 두는 것으로 정리되었습니다.
+- 휴면 전환은 별도 배치 없이 **로그인 시도 시점**에 판단합니다. `users`에 `last_login_at` 컬럼을 추가했고, 로그인 시 비밀번호 검증에 성공한 뒤 `last_login_at` 기준으로 휴면 기준일(문서상 예시 90일)을 넘었으면 `status`를 `DORMANT`로 전환하고 이메일 인증번호를 발송합니다. JWT는 이 시점에 발급하지 않습니다.
+- 재활성화는 새 엔드포인트 `POST /auth/login/reactivate`로 처리합니다. 인증번호를 검증하면 `status`를 `ACTIVE`로 되돌리고, 최초 로그인 시도에서 이미 끝난 비밀번호 검증을 다시 요구하지 않고 그대로 JWT를 발급합니다.
+- `POST /auth/login`은 `status = 'DELETED'`인 계정의 로그인도 거부하도록 명확히 했습니다(기존에는 이 분기가 문서에 없었습니다).
 - (자세한 내용은 [auth-db.md](./03_Database/auth-db.md), [auth.md](./01_Domain/auth.md), [auth-api.md](./02_API/auth-api.md), [login.md](./04_sequence/login.md), [withdraw.md](./04_sequence/withdraw.md) 참고)
 
 ---

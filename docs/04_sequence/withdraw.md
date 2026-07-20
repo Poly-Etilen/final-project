@@ -11,9 +11,9 @@ Cultivation Service는 이 이벤트를 구독하여 재배 데이터 비활성�
 (기존에는 Auth Service도 이 이벤트를 구독해 Refresh Token을 삭제했으나, 서비스 통합으로
 Refresh Token 삭제가 내부 동기 처리로 바뀌면서 더 이상 이벤트 구독이 필요하지 않습니다.)
 
-> ℹ️ **변경 이력**: Soft Delete 표현 방식이 `deleted_at` 컬럼(NULL 여부로 판단)에서
-> `status` 컬럼(ACTIVE/DELETED)으로 바뀌었습니다. 탈퇴 시각은 별도 컬럼 대신 탈퇴 처리 시점의
-> `updated_at`으로 확인합니다. (자세한 내용은 [auth-db.md](../03_Database/auth-db.md) 참고)
+> ℹ️ **변경 이력**: Soft Delete는 `status` 컬럼(ACTIVE/DORMANT/DELETED)으로 상태를 표현하고,
+> 탈퇴 시각은 `deleted_at` 컬럼에 별도로 기록합니다. `updated_at`은 탈퇴 이외의 이유로도 바뀔
+> 수 있어 탈퇴 시각 판단에는 쓰지 않습니다. (자세한 내용은 [auth-db.md](../03_Database/auth-db.md) 참고)
 
 ---
 
@@ -106,14 +106,19 @@ users 테이블의
 status
 ```
 
-컬럼을 `'DELETED'`로 변경합니다. `updated_at`도 이 시점으로 함께 갱신되어, 별도 컬럼 없이도
-탈퇴 시각을 확인할 수 있습니다.
+컬럼을 `'DELETED'`로 변경하고, 같은 시점에
+
+```
+deleted_at
+```
+
+컬럼에 탈퇴 처리 시각을 기록합니다.
 
 예시
 
 ```
 status = 'DELETED'
-updated_at = 2026-08-15T13:30:00
+deleted_at = 2026-08-15T13:30:00
 ```
 
 사용자 정보는 즉시 삭제하지 않습니다.
@@ -236,7 +241,7 @@ Subscribe
 
 # 고려 사항
 
-- 회원 탈퇴는 `status = 'DELETED'`로 표현하는 Soft Delete로 처리하며 개인정보를 즉시 파기하지 않습니다.
+- 회원 탈퇴는 `status = 'DELETED'` + `deleted_at`(정확한 탈퇴 시각)으로 표현하는 Soft Delete로 처리하며 개인정보를 즉시 파기하지 않습니다.
 - Refresh Token 삭제는 Auth Service 내부에서 동기로 즉시 처리되어, 탈퇴 응답 시점부터 재로그인이 불가능합니다.
 - Auth Service는 이벤트 발행 이후 Cultivation Service의 처리 결과를 기다리지 않습니다.
 - Cultivation Service의 후속 처리가 실패해도 탈퇴 자체는 롤백하지 않습니다.

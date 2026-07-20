@@ -17,13 +17,20 @@ Base URL
 인증 방식
 
 ```
-회원가입, 로그인, 구글 로그인, 이메일 인증, 토큰 재발급은 인증 불필요
+회원가입, 로그인, 휴면 계정 재활성화, 구글 로그인, 이메일 인증, 토큰 재발급은 인증 불필요
 그 외 요청은 Bearer JWT
 ```
 
 > ℹ️ **변경 이력**: 구글 소셜 로그인(`POST /auth/google`)이 추가되었습니다. 이메일/비밀번호
 > 회원가입은 `provider='LOCAL'`로, 구글 로그인은 `provider='GOOGLE'`로 구분해 저장합니다.
-> 회원 탈퇴 처리도 `deleted_at` 대신 `status='DELETED'`로 바뀌었습니다.
+> 회원 탈퇴 처리는 `status='DELETED'`로 표현하며, 정확한 탈퇴 시각은 `deleted_at`에
+> 함께 기록합니다.
+
+> ℹ️ **변경 이력**: 휴면 계정(`DORMANT`) 정책이 추가되었습니다. `POST /auth/login`에서
+> 비밀번호 검증에 성공해도 `last_login_at` 기준 장기 미로그인이면 즉시 로그인시키지 않고
+> 이메일로 인증번호를 발송한 뒤, 새로 추가된 `POST /auth/login/reactivate`로 인증번호를
+> 확인해야 로그인이 완료됩니다. 자세한 내용은 [auth-db.md](../03_Database/auth-db.md)의
+> "휴면 계정 (Dormant)" 참고.
 
 ---
 
@@ -164,7 +171,42 @@ Auth+User가 통합되기 전에는 이 시점에 User Service로 별도 OpenFei
 
 ---
 
-### Response
+### Process
+
+Client
+
+↓
+
+Auth Service
+
+↓
+
+email로 users 조회
+
+↓
+
+status = 'DELETED' → A010 반환 (로그인 거부)
+
+↓
+
+비밀번호 검증 (BCrypt)
+
+↓
+
+status 판단
+
+```
+status = 'ACTIVE' AND (지금 - last_login_at) <= 휴면 기준일(90일)
+→ 정상 로그인. last_login_at 갱신, JWT 발급
+
+status = 'DORMANT' 이거나
+status = 'ACTIVE' AND (지금 - last_login_at) > 휴면 기준일
+→ status를 'DORMANT'로 전환, 인증번호 발송(Redis, TTL 5분), JWT는 발급하지 않음
+```
+
+---
+
+### Response (정상 로그인)
 
 ```json
 {
@@ -175,6 +217,77 @@ Auth+User가 통합되기 전에는 이 시점에 User Service로 별도 OpenFei
 ```
 
 Access Token 유효시간은 30분, Refresh Token 유효시간은 14일이며 Redis에 저장됩니다.
+
+---
+
+### Response (휴면 전환됨)
+
+```json
+{
+    "message": "휴면 계정입니다. 이메일로 인증번호를 발송했습니다.",
+    "reactivationRequired": true
+}
+```
+
+토큰은 발급되지 않습니다. 클라이언트는 `POST /auth/login/reactivate`로 인증번호를 제출해야
+로그인이 완료됩니다.
+
+---
+
+# 휴면 계정 재활성화
+
+## POST /auth/login/reactivate
+
+`POST /auth/login`에서 `reactivationRequired: true`를 받은 뒤, 이메일로 받은 인증번호를
+제출하여 로그인을 완료합니다.
+
+### Request
+
+```json
+{
+    "email": "mushroom@example.com",
+    "code": "845231"
+}
+```
+
+---
+
+### Process
+
+Client
+
+↓
+
+Auth Service
+
+↓
+
+Redis에서 인증번호 검증 (email:{email})
+
+↓
+
+status를 'ACTIVE'로 전환, last_login_at 갱신
+
+↓
+
+JWT 발급 (Access Token + Refresh Token)
+
+비밀번호는 최초 `POST /auth/login` 시도에서 이미 검증되었으므로 여기서는 다시 요구하지
+않습니다.
+
+---
+
+### Response
+
+```json
+{
+    "accessToken": "eyJhbGciOiJIUzI1NiIs...",
+    "refreshToken": "eyJhbGciOiJIUzI1NiIs...",
+    "expiresIn": 1800
+}
+```
+
+응답 형식은 `POST /auth/login`의 정상 로그인 응답과 동일합니다.
 
 ---
 
@@ -344,7 +457,7 @@ Auth Service
 
 ↓
 
-users Soft Delete (status='DELETED') + Refresh Token 삭제 (같은 서비스 내부 처리, 즉시 수행)
+users Soft Delete (status='DELETED', deleted_at=현재 시각) + Refresh Token 삭제 (같은 서비스 내부 처리, 즉시 수행)
 
 ↓
 
@@ -406,6 +519,7 @@ Auth+User가 분리되어 있던 시절에는 Refresh Token 삭제도 이벤트�
 | A010 | 이미 탈퇴한 사용자 |
 | A011 | 유효하지 않은 구글 ID Token (서명 검증 실패, 만료 등) |
 | A012 | 구글 인증 서버 응답 실패/시간 초과 |
+| A013 | 휴면 계정 (이메일 재인증 필요, `POST /auth/login/reactivate`로 재시도) |
 
 ---
 
