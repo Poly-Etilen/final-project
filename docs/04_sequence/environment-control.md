@@ -27,8 +27,12 @@ Sensor Service는 Redis는 매초 그대로 갱신하고 InfluxDB는 재배별 1
 > 즉시 저장하는 방식을 검토했었지만, 책임 분리를 위해 다시 별도 서비스로 나누고 RabbitMQ로 연결했습니다.
 
 목표 환경 범위는 Rule Engine Service의 Redis 캐시(`cultivation:{cultivationId}:range`)에서 먼저 조회합니다.
-Cultivation Service를 매번 동기 호출하지 않기 위한 것으로, 캐시가 없을 때만 Cultivation Service를
+Sensor Service를 매번 동기 호출하지 않기 위한 것으로, 캐시가 없을 때만 Sensor Service를
 OpenFeign으로 호출해 값을 채웁니다.
+
+> ℹ️ **변경 이력**: 팀 회의 결과 `environment_setting` 테이블이 Cultivation Service에서
+> Sensor Service로 이관되면서, 이 fallback 호출 대상과 `EnvironmentRangeUpdatedEvent` 발행
+> 주체가 모두 Sensor Service로 바뀌었습니다.
 
 제어가 필요한 경우 제어 명령을 생성하고, 사용자에게 알림을 전송합니다.
 
@@ -51,7 +55,7 @@ MQTT Broker
 
 Rule Engine Service
 
-├── 목표 환경 범위 조회 (Redis 캐시 우선, 미스 시 Cultivation Service OpenFeign fallback)
+├── 목표 환경 범위 조회 (Redis 캐시 우선, 미스 시 Sensor Service OpenFeign fallback)
 ├── 범위 비교 (min/max)
 └── 제어 여부 판단
 
@@ -130,11 +134,12 @@ Redis 캐시(`cultivation:{cultivationId}:range`)를 먼저 조회합니다.
 ```
 Cache Hit → 즉시 사용
 
-Cache Miss → Cultivation Service OpenFeign 호출 → Redis에 캐시 저장 후 사용
+Cache Miss → Sensor Service OpenFeign 호출 → Redis에 캐시 저장 후 사용
 ```
 
-캐시는 평상시 Cultivation Service가 환경을 저장/수정할 때 발행하는 EnvironmentRangeUpdatedEvent를
-구독해 미리 채워져 있으므로, OpenFeign 호출은 캐시가 없는 예외적인 상황에만 발생합니다.
+캐시는 평상시 Sensor Service가 environment_setting을 저장/수정할 때 발행하는
+EnvironmentRangeUpdatedEvent를 구독해 미리 채워져 있으므로, OpenFeign 호출은 캐시가 없는
+예외적인 상황에만 발생합니다.
 
 예시
 
@@ -150,7 +155,7 @@ Humidity
 humidity_min 85% ~ humidity_max 95%
 ```
 
-이 범위는 Cultivation Service가 사용자의 단일 목표값(예: 온도 22℃)에 허용 오차를 적용해
+이 범위는 Sensor Service가 사용자의 단일 목표값(예: 온도 22℃)에 허용 오차를 적용해
 저장해 둔 값입니다.
 
 ---
@@ -306,7 +311,7 @@ RabbitMQ Subscribe (EnvironmentControlEvent)
 사용자가 환경 설정을 저장/수정할 때마다 아래 흐름으로 Rule Engine Service의 캐시가 갱신됩니다.
 
 ```
-Cultivation Service
+Sensor Service
 
 ↓
 
@@ -365,7 +370,7 @@ Subscribe
 
 - Sensor Service (EnvironmentMeasuredEvent)
 - Notification Service (EnvironmentControlEvent)
-- Rule Engine Service (EnvironmentRangeUpdatedEvent, Cultivation Service가 발행)
+- Rule Engine Service (EnvironmentRangeUpdatedEvent, Sensor Service가 발행)
 
 ---
 
@@ -376,7 +381,7 @@ Rule Engine Service
 
 ↓
 
-Cultivation Service (Redis 캐시 미스 시에만 호출하는 fallback — 목표 환경 범위 조회)
+Sensor Service (Redis 캐시 미스 시에만 호출하는 fallback — 목표 환경 범위 조회)
 ```
 
 ---
@@ -400,7 +405,7 @@ Cultivation Service (Redis 캐시 미스 시에만 호출하는 fallback — 목
 - MQTT 연결 실패
 - 규칙 평가 오류
 - Redis 캐시 조회/저장 실패 (Rule Engine Service)
-- 목표 환경 범위 조회 실패 (캐시 미스 시 Cultivation Service fallback 호출 실패)
+- 목표 환경 범위 조회 실패 (캐시 미스 시 Sensor Service fallback 호출 실패)
 - RabbitMQ 발행 실패
 - Sensor Service 저장 실패
 - Notification 전송 실패
@@ -414,5 +419,5 @@ Cultivation Service (Redis 캐시 미스 시에만 호출하는 fallback — 목
 - Rule Engine Service는 저장을 직접 하지 않고 RabbitMQ로 Sensor Service에 위임합니다.
 - Rule Engine Service와 Sensor Service는 RabbitMQ로만 연결되며 서로 직접 호출하지 않습니다.
 - Notification Service는 EnvironmentControlEvent만 구독하며, 저장용 EnvironmentMeasuredEvent는 구독하지 않습니다.
-- 목표 환경 범위는 Redis 캐시를 우선 사용해 Cultivation Service에 매 센서 수신마다 동기 호출이 몰리는 것을 방지합니다. 캐시는 EnvironmentRangeUpdatedEvent로 write-through 갱신되며, TTL(24시간)은 이벤트 유실에 대비한 안전장치입니다.
+- 목표 환경 범위는 Redis 캐시를 우선 사용해 Sensor Service에 매 센서 수신마다 동기 호출이 몰리는 것을 방지합니다. 캐시는 EnvironmentRangeUpdatedEvent로 write-through 갱신되며, TTL(24시간)은 이벤트 유실에 대비한 안전장치입니다.
 - 규칙 평가는 매초 원본 데이터로 수행되어 자동 제어 반응 속도에는 영향이 없지만, Sensor Service의 InfluxDB 저장은 재배별 10초 간격으로 스로틀링됩니다. Redis "현재값"은 매초 갱신되어 대시보드 체감 실시간성은 유지됩니다.

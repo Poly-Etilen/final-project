@@ -11,10 +11,15 @@ Rule Engine Service는 MQTT로 수신한 센서 데이터를 검증하고, 규�
 > Rule Engine Service가 MQTT 수신(Collector 역할 포함)까지 담당하고, 저장은 RabbitMQ를 통해
 > Sensor Service에 위임합니다.
 
-> ℹ️ **변경 이력**: 처음에는 규칙 평가 때마다 Cultivation Service를 OpenFeign으로 매번 호출해
-> 목표 환경 범위를 조회했지만, 센서 데이터가 수신될 때마다(수 초~수십 초 주기) 동기 호출이
-> 발생해 Cultivation Service에 부하가 몰리고 장애 시 자동 제어 자체가 막히는 문제가 있었습니다.
+> ℹ️ **변경 이력**: 처음에는 규칙 평가 때마다 목표 환경 범위를 소유한 서비스를 OpenFeign으로
+> 매번 호출해 조회했지만, 센서 데이터가 수신될 때마다(수 초~수십 초 주기) 동기 호출이
+> 발생해 해당 서비스에 부하가 몰리고 장애 시 자동 제어 자체가 막히는 문제가 있었습니다.
 > 이를 해결하기 위해 Redis에 목표 환경 범위를 캐싱하는 방식을 도입했습니다.
+
+> ℹ️ **변경 이력**: 팀 회의 결과 `environment_setting` 테이블이 Cultivation Service에서
+> Sensor Service로 이관되면서, 아래 fallback 호출 대상과 `EnvironmentRangeUpdatedEvent` 발행
+> 주체가 모두 Cultivation Service에서 Sensor Service로 바뀌었습니다. (자세한 내용은
+> [sensor.md](./sensor.md), [README.md](../README.md)의 결정 사항 #24 참고)
 
 > ℹ️ **변경 이력**: 자동 제어의 정지(OFF) 기준을 "범위 안으로 복귀"에서 "범위의 중앙값(mid)
 > 도달"로 명확히 했습니다. 기존에도 범위 자체가 히스테리시스 역할을 했지만, 경계를 살짝
@@ -68,12 +73,12 @@ Cache Hit → 즉시 사용
 
 ↓
 
-Cache Miss → Cultivation Service OpenFeign 호출 → Redis에 캐시 저장 후 사용
+Cache Miss → Sensor Service OpenFeign 호출 → Redis에 캐시 저장 후 사용
 ```
 
-캐시는 기본적으로 Cultivation Service가 환경을 저장/수정할 때 발행하는 EnvironmentRangeUpdatedEvent를
-구독해 미리 채워둡니다(write-through). OpenFeign 호출은 캐시가 아직 없는 예외 상황(서비스 재시작 직후 등)에만
-발생하는 fallback입니다.
+캐시는 기본적으로 Sensor Service가 environment_setting을 저장/수정할 때 발행하는
+EnvironmentRangeUpdatedEvent를 구독해 미리 채워둡니다(write-through). OpenFeign 호출은
+캐시가 아직 없는 예외 상황(서비스 재시작 직후 등)에만 발생하는 fallback입니다.
 
 ---
 
@@ -190,10 +195,11 @@ Redis(최신값)/InfluxDB(이력)에 저장합니다.
 ## 센서 오류 감지
 
 수신 주기와 데이터 유효성을 검사하여 센서 오류(OFFLINE/ERROR)를 감지하고,
-Cultivation Service의 센서 상태를 갱신하도록 이벤트를 발행합니다.
+Sensor Service의 센서 상태를 갱신하도록 이벤트를 발행합니다.
 
-> ℹ️ **변경 이력**: 센서 장치 CRUD가 DatasourceGenerator에서 Cultivation Service로 이전되면서,
-> SensorErrorEvent의 구독 주체도 DatasourceGenerator에서 Cultivation Service로 함께 옮겨졌습니다.
+> ℹ️ **변경 이력**: 센서 장치 CRUD가 DatasourceGenerator → Cultivation Service → Sensor
+> Service 순으로 이전되면서, SensorErrorEvent의 구독 주체도 그때마다 함께 옮겨졌습니다.
+> 현재는 Sensor Service가 구독합니다.
 
 ---
 
@@ -246,7 +252,7 @@ EnvironmentRangeUpdatedEvent를 받을 때마다 값을 갱신하며 TTL도 24�
 TTL은 이벤트 유실 등으로 캐시가 오래 방치되는 것을 막기 위한 안전장치이며,
 정상 흐름에서는 이벤트로 계속 갱신되어 만료 전에 항상 최신값을 유지합니다.
 
-캐시가 없을 때(TTL 만료, 서비스 재시작 직후 등)는 Cultivation Service를 OpenFeign으로 호출해
+캐시가 없을 때(TTL 만료, 서비스 재시작 직후 등)는 Sensor Service를 OpenFeign으로 호출해
 값을 조회한 뒤 Redis에 채워 넣습니다.
 
 ---
@@ -255,7 +261,7 @@ TTL은 이벤트 유실 등으로 캐시가 오래 방치되는 것을 막기 �
 
 ## 호출하는 서비스
 
-### Cultivation Service
+### Sensor Service
 
 - 재배별 목표 환경 범위(environment_setting의 min~max) 조회 (Redis 캐시 미스 시에만 호출하는 fallback)
 
@@ -295,14 +301,14 @@ sensor/+
 # RabbitMQ
 
 Rule Engine Service는 저장(Sensor Service)과 알림(Notification Service)처럼
-분리된 다른 서비스로 데이터를 전달할 때, 그리고 Cultivation Service로부터 목표 환경 범위 변경을
+분리된 다른 서비스로 데이터를 전달할 때, 그리고 Sensor Service로부터 목표 환경 범위 변경을
 전달받을 때 RabbitMQ를 사용합니다.
 
 ## Subscribe Event
 
 ### EnvironmentRangeUpdatedEvent
 
-Cultivation Service가 environment_setting을 생성/수정할 때 발행합니다.
+Sensor Service가 environment_setting을 생성/수정할 때 발행합니다.
 
 ```json
 {
@@ -320,7 +326,7 @@ Cultivation Service가 environment_setting을 생성/수정할 때 발행합니�
 ```
 
 수신 시 Redis 캐시(`cultivation:{cultivationId}:range`)를 즉시 갱신합니다.
-발행 서비스: Cultivation Service
+발행 서비스: Sensor Service
 
 ---
 
@@ -368,7 +374,7 @@ Cultivation Service가 environment_setting을 생성/수정할 때 발행합니�
 
 센서 오류/연결 해제가 감지되었을 때 발행합니다.
 
-구독 서비스: Cultivation Service (sensor.status 갱신), Notification Service (알림)
+구독 서비스: Sensor Service (sensor.status 갱신), Notification Service (알림)
 
 ---
 
@@ -408,7 +414,7 @@ MQTT Broker
 Rule Engine Service
 
 ├── 검증
-├── 목표 환경 범위 조회 (Redis 캐시 우선, 미스 시 Cultivation Service OpenFeign fallback)
+├── 목표 환경 범위 조회 (Redis 캐시 우선, 미스 시 Sensor Service OpenFeign fallback)
 ├── 규칙 평가 → 장치 자동 제어 (범위 벗어나면 ON, 중앙값 도달하면 OFF)
 └── RabbitMQ Publish
 
@@ -422,7 +428,7 @@ EnvironmentControlEvent (제어 발생 시만) → Notification Service
 
 ## 목표 환경 범위 캐시 갱신
 
-Cultivation Service
+Sensor Service
 
 ↓
 
@@ -449,7 +455,7 @@ Redis 캐시 갱신 (cultivation:{cultivationId}:range)
 - 장치 제어 실패
 - 잘못된 센서 데이터
 - Redis 캐시 조회/저장 실패
-- Cultivation Service 호출 실패 (Redis 캐시 미스 시 fallback 호출)
+- Sensor Service 호출 실패 (Redis 캐시 미스 시 fallback 호출)
 - EnvironmentRangeUpdatedEvent 구독 실패 (캐시가 최신 값으로 갱신되지 않음, TTL 만료 전까지 이전 값 사용)
 - RabbitMQ 발행 실패
 

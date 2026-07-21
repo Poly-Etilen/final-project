@@ -7,9 +7,14 @@
 임의로 온도를 높였는데, 그 이후 생육 점수가 개선되는 추세라면 이를 짚어줍니다.
 
 AI Service의 Daily Scheduler가 매일 재배별로 생육 분석 이력(`growth_record`)과 환경 변경
-이력(Cultivation Service의 `environment_setting`)을 비교해 피드백을 생성합니다. 주간
+이력(Sensor Service의 `environment_setting`)을 비교해 피드백을 생성합니다. 주간
 리포트([ai-report.md](./ai-report.md))와 마찬가지로 push 모델이며, 사용자가 생성을
 요청하지 않습니다.
+
+> ℹ️ **변경 이력**: 팀 회의 결과 `environment_setting` 테이블이 Cultivation Service에서
+> Sensor Service로 완전히 이관되었습니다. 아래 3번 단계의 조회 대상이 Sensor Service로
+> 바뀌었습니다. (자세한 내용은 [sensor.md](../01_Domain/sensor.md), [README.md](../README.md)의
+> 결정 사항 #24 참고)
 
 전날 사용자가 생육 사진을 찍지 않았다면 비교할 `growth_record`가 없으므로, 그 경우에는 LLM을
 호출하지 않고 고정된 안내 문구로 피드백을 대신합니다. 이 경우에도 그날의 `daily_feedback`
@@ -38,7 +43,7 @@ RUNNING 상태 재배 순회
 
 ↓
 
-Cultivation Service OpenFeign 호출 (environment_setting 최근 변경 이력)
+Sensor Service OpenFeign 호출 (environment_setting 최근 변경 이력)
 
 ├── 오늘 growth_record 있음 → LLM 호출 (환경 변경 vs 생육 추이 상관관계 해석)
 └── 오늘 growth_record 없음 → LLM 미호출, 고정 안내 문구 사용
@@ -83,11 +88,11 @@ AI Service
 
 ↓
 
-OpenFeign
+OpenFeign (`GET /api/v1/sensors/cultivations/{cultivationId}/environment-history`)
 
 ↓
 
-Cultivation Service
+Sensor Service
 
 전달 데이터 예시 (응답)
 
@@ -102,7 +107,7 @@ Cultivation Service
 ```
 
 `environment_setting`이 타입별로 여러 행이 누적되는 구조이기 때문에(자세한 내용은
-[cultivation-db.md](../03_Database/cultivation-db.md) 참고), 최근 N일간의 변경 이력을 그대로
+[sensor-db.md](../03_Database/sensor-db.md) 참고), 최근 N일간의 변경 이력을 그대로
 받아 "언제 얼마나 바뀌었는지"를 확인할 수 있습니다.
 
 ---
@@ -219,7 +224,7 @@ AI Service
 
 ↓
 
-Cultivation Service (environment_setting 최근 변경 이력 조회)
+Sensor Service (environment_setting 최근 변경 이력 조회, GET /api/v1/sensors/cultivations/{cultivationId}/environment-history)
 ```
 
 ---
@@ -243,7 +248,7 @@ Notification Service (DailyFeedbackCompletedEvent)
 # 예외 상황
 
 - Daily Scheduler 실행 실패 (해당 날짜는 daily_feedback이 생성되지 않음)
-- Cultivation Service 호출 실패 (environment_setting 조회 실패 — 이 경우 환경 비교 없이 생육
+- Sensor Service 호출 실패 (environment_setting 조회 실패 — 이 경우 환경 비교 없이 생육
   추이만으로 피드백을 생성하거나, 해당 재배는 다음날 재시도)
 - LLM 응답 실패
 - daily_feedback 저장 실패 (PostgreSQL)

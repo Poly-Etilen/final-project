@@ -38,11 +38,11 @@ API Gateway를 포함해 9개 서비스로 구성됩니다. (기존 9개 서비�
 |--------|-----------|--------|-----|----------|----------------|
 | API Gateway | 라우팅, 인증 토큰 검증 | - | - | - | 전체 시퀀스 최초 진입점 |
 | Auth | 인증/인가(이메일+구글 소셜 로그인), JWT, 이메일 인증, 회원 프로필/탈퇴/재배 통계 (기존 Auth+User 통합) | [auth.md](./01_Domain/auth.md) | [auth-api.md](./02_API/auth-api.md) | [auth-db.md](./03_Database/auth-db.md) | [signup](./04_sequence/signup.md), [login](./04_sequence/login.md), [withdraw](./04_sequence/withdraw.md) |
-| Cultivation | 재배 생성/관리/수확/사진 업로드, 공공데이터 기반 환경 추천(`mushroom_reference` 조회), 센서 장치 등록/조회/삭제(재배 생성과 동시 등록 가능), 환경 설정 이력 관리(`environment_setting`) | [cultivation.md](./01_Domain/cultivation.md) | [cultivation-api.md](./02_API/cultivation-api.md) | [cultivation-db.md](./03_Database/cultivation-db.md) | [create-cultivation](./04_sequence/create-cultivation.md), [harvest](./04_sequence/harvest.md), [growth-analysis](./04_sequence/growth-analysis.md), [sensor-error](./04_sequence/sensor-error.md) |
-| AI | 생육 분석(Vision), 챗봇(대화 이력 저장/조회), 주간 리포트, 일일 피드백, 버섯 가이드(효능/주의사항) | [ai.md](./01_Domain/ai.md) | [ai-api.md](./02_API/ai-api.md) | [ai-db.md](./03_Database/ai-db.md), Redis(캐시), MinIO(읽기 전용) | [create-cultivation](./04_sequence/create-cultivation.md), [growth-analysis](./04_sequence/growth-analysis.md), [harvest](./04_sequence/harvest.md), [ai-chat](./04_sequence/ai-chat.md), [ai-report](./04_sequence/ai-report.md), [daily-feedback](./04_sequence/daily-feedback.md) |
-| Embedding | 재배 참조 데이터 임베딩·벡터 검색 (AI 챗봇 유사 사례 검색용) | [embedding.md](./01_Domain/embedding.md) | [embedding-api.md](./02_API/embedding-api.md) | [elasticSearch.md](./03_Database/elasticSearch.md) | [ai-chat](./04_sequence/ai-chat.md) |
+| Cultivation | 재배 생성/관리(센서 등록은 Sensor Service에 OpenFeign 위임)/수확/사진 업로드, 공공데이터 기반 환경 추천(`mushroom_reference` 조회), 수확 임베딩 여부 관리(`harvest.is_embedded`, 인사이트 기능용), 재배 소유권 확인 API 제공(내부용, Sensor Service가 호출) | [cultivation.md](./01_Domain/cultivation.md) | [cultivation-api.md](./02_API/cultivation-api.md) | [cultivation-db.md](./03_Database/cultivation-db.md) | [create-cultivation](./04_sequence/create-cultivation.md), [harvest](./04_sequence/harvest.md), [growth-analysis](./04_sequence/growth-analysis.md), [sensor-error](./04_sequence/sensor-error.md), [insight](./04_sequence/insight.md) |
+| AI | 생육 분석(Vision), 챗봇(대화 이력 저장/조회), 주간 리포트, 일일 피드백, 인사이트(타인의 유사 재배 사례 기반 피드백), 버섯 가이드(효능/주의사항) | [ai.md](./01_Domain/ai.md) | [ai-api.md](./02_API/ai-api.md) | [ai-db.md](./03_Database/ai-db.md), Redis(캐시), MinIO(읽기 전용) | [create-cultivation](./04_sequence/create-cultivation.md), [growth-analysis](./04_sequence/growth-analysis.md), [harvest](./04_sequence/harvest.md), [ai-chat](./04_sequence/ai-chat.md), [ai-report](./04_sequence/ai-report.md), [daily-feedback](./04_sequence/daily-feedback.md), [insight](./04_sequence/insight.md) |
+| Embedding | 재배 참조 데이터 임베딩·벡터 검색 (AI 챗봇 유사 사례 검색용), 인사이트 사례 배치 임베딩·검색 (`cultivation_insight` 인덱스) | [embedding.md](./01_Domain/embedding.md) | [embedding-api.md](./02_API/embedding-api.md) | [elasticSearch.md](./03_Database/elasticSearch.md) | [ai-chat](./04_sequence/ai-chat.md), [insight](./04_sequence/insight.md) |
 | Rule Engine | MQTT 수신(Collector), 검증, 규칙 평가/자동 제어, 센서 오류 감지 | [rule-Engine.md](./01_Domain/rule-Engine.md) | API 없음 (MQTT/RabbitMQ 기반, [rule-engine-api.md](./02_API/rule-engine-api.md) 참고) | Redis(목표 환경 범위 캐시만, 영구 저장소 없음) | [sensor-data](./04_sequence/sensor-data.md), [environment-control](./04_sequence/environment-control.md), [sensor-error](./04_sequence/sensor-error.md) |
-| Sensor | 측정값 저장(Redis/InfluxDB)·조회·통계·주간 리포트 집계(Weekly Scheduler) | [sensor.md](./01_Domain/sensor.md) | [sensor-api.md](./02_API/sensor-api.md) | [influxdb.md](./03_Database/influxdb.md), [redis.md](./03_Database/redis.md) | [sensor-data](./04_sequence/sensor-data.md), [environment-control](./04_sequence/environment-control.md) |
+| Sensor | 측정값 저장(Redis/InfluxDB)·조회·통계·주간 리포트 집계(Weekly Scheduler), 센서 장치 등록/조회/삭제(`sensor`, Cultivation DB에서 이관), 목표 환경 범위 저장/조회/평균 계산(`environment_setting`, Cultivation DB에서 이관 — Sensor Service 최초의 PostgreSQL) | [sensor.md](./01_Domain/sensor.md) | [sensor-api.md](./02_API/sensor-api.md) | [sensor-db.md](./03_Database/sensor-db.md), [influxdb.md](./03_Database/influxdb.md), [redis.md](./03_Database/redis.md) | [sensor-data](./04_sequence/sensor-data.md), [environment-control](./04_sequence/environment-control.md), [create-cultivation](./04_sequence/create-cultivation.md), [sensor-error](./04_sequence/sensor-error.md), [daily-feedback](./04_sequence/daily-feedback.md), [insight](./04_sequence/insight.md) |
 | Notification | WebSocket/Telegram/Discord 알림, 알림 이력 조회/읽음 처리 | [notification.md](./01_Domain/notification.md) | [notification-api.md](./02_API/notification-api.md) (알림 발송 자체는 RabbitMQ 기반) | [notification-db.md](./03_Database/notification-db.md) | [environment-control](./04_sequence/environment-control.md), [harvest](./04_sequence/harvest.md), [sensor-error](./04_sequence/sensor-error.md) |
 | DatasourceGenerator | 센서 데이터 생성/발행 (MQTT Publish 전용, REST API 없음, 기존 Datasource Service 리네임) | [datasource-generator.md](./01_Domain/datasource-generator.md) | API 없음 ([datasource-generator-api.md](./02_API/datasource-generator-api.md) 참고) | DB 없음, 메모리 캐시만 사용 ([datasource-generator-db.md](./03_Database/datasource-generator-db.md) 참고) | [sensor-data](./04_sequence/sensor-data.md) |
 
@@ -59,7 +59,7 @@ DB 전체 그림은 [database-overview.md](./03_Database/database-overview.md)�
 그 과정에서 통합했다가 다시 분리한 부분도 있습니다.
 
 - **Auth + User → Auth Service (통합 유지)** — 인증과 회원 프로필은 항상 같이 조회/변경되는 경우가 많아 하나의 서비스, 하나의 `users` 테이블로 통합했습니다.
-- **Collector + Rule Engine + Sensor(Storage) → 한때 Rule Engine Service로 통합했다가 다시 Rule Engine Service / Sensor Service로 분리** — MQTT 수신·규칙평가·자동제어와 측정값 저장·조회는 책임 크기와 변경 주기가 달라 분리를 유지하기로 했습니다. 대신 Collector는 Rule Engine Service에 남기고(수신·검증), 저장·조회 API는 Sensor Service로 분리했습니다. 두 서비스는 RabbitMQ(EnvironmentMeasuredEvent)로만 연결되며 서로 직접 호출하지 않습니다.
+- **Collector + Rule Engine + Sensor(Storage) → 한때 Rule Engine Service로 통합했다가 다시 Rule Engine Service / Sensor Service로 분리** — MQTT 수신·규칙평가·자동제어와 측정값 저장·조회는 책임 크기와 변경 주기가 달라 분리를 유지하기로 했습니다. 대신 Collector는 Rule Engine Service에 남기고(수신·검증), 저장·조회 API는 Sensor Service로 분리했습니다. 두 서비스는 RabbitMQ(EnvironmentMeasuredEvent)로만 연결되며 서로 직접 호출하지 않습니다. **(이후 결정 사항 24번에서 `environment_setting`이 Sensor Service로 이관되며, Redis 캐시 미스 시에 한해 Rule Engine Service가 Sensor Service를 OpenFeign으로 예외적으로 호출하는 fallback이 생겼습니다. "서로 직접 호출하지 않는다"는 이제 평상시 기준으로만 유효합니다.)**
 - **Datasource Service → DatasourceGenerator (리네임 유지)** — 역할은 동일하지만(장치/센서 메타데이터 관리, 시뮬레이션 데이터 발행), 실제 물리 센서가 아닌 시뮬레이션 데이터 생성기라는 점을 이름에 명시했습니다.
 
 최종 구성: API Gateway, Auth, Cultivation, AI, Embedding, Rule Engine, Sensor, Notification, DatasourceGenerator (총 9개)
@@ -85,9 +85,9 @@ Auth Service가 Soft Delete와 Refresh Token 삭제를 같은 트랜잭션에서
 ### 6. environment_setting은 단일 목표값이 아닌 범위(min~max)로 저장
 Rule Engine Service의 자동 제어가 값이 범위를 벗어날 때만 장치를 동작시키도록 하여, 범위 안에서 불필요하게 켜고 끄는 것(채터링)을 막기 위함입니다.
 
-- 환경 설정 저장 API(`PATCH /cultivations/{id}/environment`)는 그대로 단일 목표값을 주고받습니다. (재배 생성 시 보여주는 추천값은 이후 결정 사항 9번에서 범위 형태로 바뀌었습니다.)
-- Cultivation Service가 저장 시점에 단일 목표값에 허용 오차를 적용해 범위로 변환합니다. (예: 온도 22℃ ± 1.5℃ → temp_min 20.5 / temp_max 23.5)
-- 컬럼명은 `temp_min`/`temp_max`, `humidity_min`/`humidity_max`, `co2_min`/`co2_max`, `light_min`/`light_max`였습니다. **(결정 사항 22번에서 항목별 행 구조로 재설계되며 `(type, min, max, unit)`으로 바뀌었습니다. 아래 22번 참고.)**
+- 환경 설정 저장 API(`PATCH /cultivations/{id}/environment`)는 그대로 단일 목표값을 주고받습니다. (재배 생성 시 보여주는 추천값은 이후 결정 사항 9번에서 범위 형태로 바뀌었습니다. **API 자체의 소유 서비스는 결정 사항 24번에서 Cultivation Service → Sensor Service로 바뀌었습니다.**)
+- Cultivation Service가 저장 시점에 단일 목표값에 허용 오차를 적용해 범위로 변환합니다. (예: 온도 22℃ ± 1.5℃ → temp_min 20.5 / temp_max 23.5) **(이 변환 로직의 주체도 결정 사항 24번에서 Sensor Service로 이관되었습니다.)**
+- 컬럼명은 `temp_min`/`temp_max`, `humidity_min`/`humidity_max`, `co2_min`/`co2_max`, `light_min`/`light_max`였습니다. **(결정 사항 22번에서 항목별 행 구조로 재설계되며 `(type, min, max, unit)`으로 바뀌었습니다. 아래 22번 참고. 테이블 자체는 결정 사항 24번에서 Sensor Service DB로 이관되었습니다.)**
 - Rule Engine Service는 현재 센서값이 이 범위를 벗어날 때만 장치를 제어합니다. (자세한 내용은 [cultivation-db.md](./03_Database/cultivation-db.md), [rule-Engine.md](./01_Domain/rule-Engine.md) 참고)
 
 ### 7. Rule Engine Service가 목표 환경 범위를 Redis에 캐싱한다
@@ -99,6 +99,8 @@ Redis 캐시를 도입했습니다.
 - Cultivation Service가 environment_setting을 생성/수정할 때 `EnvironmentRangeUpdatedEvent`를 발행하고, Rule Engine Service가 이를 구독해 캐시를 미리 채워둡니다(write-through). 규칙 평가 시에는 이 캐시를 먼저 조회합니다.
 - 캐시가 없을 때(TTL 만료, 서비스 재시작 직후 등)만 Cultivation Service를 OpenFeign으로 호출하는 fallback으로 동작합니다.
 - 이 Redis는 Sensor Service의 "최신 센서값" 캐시와는 별개이며, Rule Engine Service는 여전히 PostgreSQL/InfluxDB 같은 영구 저장소는 갖지 않습니다. (자세한 내용은 [rule-Engine.md](./01_Domain/rule-Engine.md), [redis.md](./03_Database/redis.md) 참고)
+
+> ℹ️ **변경 이력**: 결정 사항 24번에서 `environment_setting`이 Cultivation Service에서 Sensor Service로 이관되며, 위 write-through 이벤트 발행 주체와 fallback 호출 대상이 모두 **Sensor Service**로 바뀌었습니다.
 
 ### 8. 센서 데이터 저장 시 Redis는 실시간(매초), InfluxDB는 10초로 스로틀링
 센서가 1초 주기로 값을 보내는 걸 그대로 InfluxDB에 다 기록하면 재배 1건 기준 한 달에 수백 MB,
@@ -132,6 +134,8 @@ Search/LLM을 거쳐도 항상 같은 값이 나오는 문제가 있었습니다
 - 센서 상태(ONLINE/OFFLINE/ERROR) 갱신용 `SensorErrorEvent`(Rule Engine Service 발행)의 구독 주체도 DatasourceGenerator에서 Cultivation Service로 함께 이전했습니다.
 - 이 변경으로 아래 "열려있는 이슈"에 있던 `/api/v1/sensors` 경로 충돌이 자연스럽게 해소되었습니다. (자세한 내용은 [cultivation-db.md](./03_Database/cultivation-db.md), [cultivation.md](./01_Domain/cultivation.md), [datasource-generator-db.md](./03_Database/datasource-generator-db.md) 참고)
 
+> ℹ️ **변경 이력**: 결정 사항 24번에서 `sensor` 테이블과 그 CRUD API가 Cultivation Service에서 **Sensor Service**로 다시 이관되었습니다. 이번 결정의 "DatasourceGenerator가 아닌 Cultivation Service" 부분은 더 이상 최신 상태가 아니며, 자세한 내용은 아래 24번을 참고해주세요.
+
 ### 11. 센서 등록 정보를 `device_eui` 기반으로 전면 재설계하고, "데이터 소스" 개념을 제거했다
 
 실제 하드웨어 식별자인 `device_eui`를 기준으로 센서를 관리하는 것이 자연스럽다고 판단해, 결정 사항 10번에서 옮긴 `sensor` 테이블의 필드 구조 자체를 다시 정리했습니다.
@@ -142,6 +146,8 @@ Search/LLM을 거쳐도 항상 같은 값이 나오는 문제가 있었습니다
 - 센서의 유일한 실질 식별자가 `device_eui`가 되면서, 등록 API뿐 아니라 **측정 파이프라인 전체**(MQTT Payload, RabbitMQ의 `EnvironmentMeasuredEvent`/`SensorErrorEvent`, InfluxDB Tag)에서 기존에 쓰던 범용 필드명 `sensorId`를 `deviceEui`로 통일했습니다. (컬럼명은 DB에서는 `device_eui`(snake_case), JSON payload에서는 `deviceEui`(camelCase)를 사용하는 기존 컨벤션을 그대로 따릅니다.)
 - API 경로 파라미터도 `{sensorId}` → `{deviceEui}`로 바뀌었습니다. (예: `DELETE /api/v1/cultivations/{id}/sensors/{deviceEui}`)
 - (자세한 내용은 [cultivation-db.md](./03_Database/cultivation-db.md), [cultivation.md](./01_Domain/cultivation.md), [cultivation-api.md](./02_API/cultivation-api.md), [datasource-generator.md](./01_Domain/datasource-generator.md), [datasource-generator-api.md](./02_API/datasource-generator-api.md), [datasource-generator-db.md](./03_Database/datasource-generator-db.md) 참고)
+
+> ℹ️ **변경 이력**: `device_eui` 기반 필드 구조 자체는 그대로 유효하지만, `sensor` 테이블의 소유 서비스는 결정 사항 24번에서 Cultivation DB → Sensor DB로 다시 바뀌었습니다.
 
 ### 12. DatasourceGenerator의 `sensor_cache`를 PostgreSQL 대신 메모리(In-Memory)로 전환했다
 
@@ -165,6 +171,8 @@ DB 자체를 없앴습니다.
 - 환경 추천(mushroom_reference 조회)을 AI에서 뺐던 이유(5종 고정이라 항상 같은 값)와 동일한 문제가 있지만, 이번엔 "수치"가 아닌 "설명 문서"를 만드는 것이라 LLM 활용이 여전히 유효하다고 판단했습니다. 대신 반복 호출을 피하기 위해 `cultivationId`가 아닌 `mushroomType` 기준으로 캐싱합니다(`ai:mushroom:{mushroomType}:guide`, TTL 7일).
 - `mushroom_reference.description`(재배 생성 응답에 포함되는 짧은 한 줄 문구)과 버섯 가이드(효능/주의사항, 별도 API로 조회하는 긴 설명)는 서로 다른 콘텐츠입니다.
 - (자세한 내용은 [cultivation-api.md](./02_API/cultivation-api.md), [cultivation.md](./01_Domain/cultivation.md), [ai.md](./01_Domain/ai.md), [ai-api.md](./02_API/ai-api.md), [create-cultivation.md](./04_sequence/create-cultivation.md), [redis.md](./03_Database/redis.md) 참고)
+
+> ℹ️ **변경 이력**: `POST /cultivations`에 `devices`를 함께 보내는 요청 형태는 그대로지만, 내부 처리 방식은 결정 사항 24번에서 "하나의 트랜잭션"에서 "Cultivation 생성 후 Sensor Service를 OpenFeign으로 배치 호출(실패 시 보상 삭제)"로 바뀌었습니다.
 
 ### 14. Rule Engine Service의 자동 제어 정지 기준을 "범위 경계"가 아닌 "중앙값"으로 명확히 했다
 
@@ -265,7 +273,7 @@ MQTT로 보내는 페이로드를 확인해보니 `device_eui`가 `"24e124128c06
 수정이 실제로 생육에 도움이 됐는지를 매일 확인해 알려주는 기능입니다. 주간 리포트와 마찬가지로
 Scheduler 기반(push)으로 만들기로 했습니다.
 
-- AI Service에 Daily Scheduler를 추가했습니다. 매일 재배별로 생육 분석 이력(`growth_record`)과 환경 변경 이력(Cultivation Service의 `environment_setting`)을 비교해 LLM으로 피드백을 생성하고, `daily_feedback`에 저장한 뒤 `DailyFeedbackCompletedEvent`를 발행합니다.
+- AI Service에 Daily Scheduler를 추가했습니다. 매일 재배별로 생육 분석 이력(`growth_record`)과 환경 변경 이력(Cultivation Service의 `environment_setting`, **결정 사항 24번에서 Sensor Service로 이관**)을 비교해 LLM으로 피드백을 생성하고, `daily_feedback`에 저장한 뒤 `DailyFeedbackCompletedEvent`를 발행합니다.
 - `growth_record` 테이블을 신설했습니다. 기존에는 생육 분석(Vision) 결과를 `ai:{cultivationId}:analysis` Redis 캐시(TTL 6시간)에만 저장해 하루만 지나도 이력이 사라졌는데, 일일 피드백이 여러 날짜의 추이를 비교하려면 영구 저장이 필요했기 때문입니다. Redis 캐시는 "빠른 재조회"용으로 그대로 유지됩니다.
 - 사용자가 전날 생육 사진을 찍지 않았다면 비교할 `growth_record`가 없으므로, 이 경우 LLM을 호출하지 않고 "전날 사진이 없어 피드백을 남길 수 없습니다"라는 고정 문구로 `daily_feedback` 행을 생성합니다(건너뛰지 않음 — "피드백 없음"과 "비교 데이터 없음"을 구분하기 위함).
 - 조회는 `GET /ai/feedback/daily`로 제공하며, 생성 자체는 API로 트리거하지 않습니다.
@@ -285,11 +293,52 @@ Scheduler 기반(push)으로 만들기로 했습니다.
 - `PATCH /cultivations/{id}/environment`가 4개 필드를 모두 요구하지 않고 **부분 수정**(예: 온도만)을 지원하도록 바뀌었습니다. 수정한 항목만 새 행이 INSERT되고, 나머지 항목의 최신 행은 그대로 유지됩니다. `EnvironmentRangeUpdatedEvent`(Rule Engine Service의 Redis 캐시 갱신용)는 기존과 동일하게 4개 항목 전체를 담아 발행합니다(Rule Engine이 항상 4개 항목 전체를 알아야 하므로).
 - (자세한 내용은 [cultivation-db.md](./03_Database/cultivation-db.md), [cultivation-api.md](./02_API/cultivation-api.md), [cultivation.md](./01_Domain/cultivation.md), [daily-feedback.md](./04_sequence/daily-feedback.md) 참고)
 
+> ℹ️ **변경 이력**: 여기서 확정한 `(type, min, max, unit)` 행 구조는 그대로 유효하지만, 테이블의 소유 서비스는 결정 사항 24번에서 Cultivation DB → Sensor DB로 이관되었습니다. `PATCH /cultivations/{id}/environment`도 Sensor Service의 엔드포인트로 옮겨졌습니다. 자세한 내용은 아래 24번, [sensor-db.md](./03_Database/sensor-db.md) 참고.
+
+### 23. "인사이트" 기능을 추가했다 (같은 버섯 종류 + 유사한 온도로 재배한 타인의 사례 기반 피드백)
+
+일일 피드백(결정 사항 21번)이 **자기 자신**의 환경 변경 이력과 생육 추이를 비교하는 기능이라면,
+인사이트는 같은 버섯 종류이면서 유사한(오차 범위 내) 온도로 재배했던 **다른 사용자들**의
+완료된 재배 사례를 바탕으로 현재 재배 상태를 피드백해주는 기능입니다. 두 기능은 서로 다른
+기능이며, "일일 피드백" 문서/코드를 확장하는 대신 완전히 새로운 흐름과 인덱스로 분리했습니다.
+
+- **데이터 적재(배치)와 조회(on-demand)를 명확히 분리했습니다.** AI Service의 Insight Batch Scheduler가 매일 00시에 실행되어, 전체 사용자를 합산해 아직 임베딩되지 않은 수확(harvest)이 20건 이상이면 그 배치를 Embedding Service로 보내 임베딩 후 Elasticsearch(`cultivation_insight` 인덱스, 신규)에 저장합니다. 반면 조회는 이 배치와 완전히 독립적으로, 사용자가 `GET /ai/insight`를 요청한 시점에만 검색/요약이 이루어집니다(일일 피드백/AI 리포트처럼 미리 생성해두지 않음).
+- **"매일 다시 훑는" 방식이 아니라 "임계치(20건)에 도달한 만큼만 처리하는" 배치 방식입니다.** 처음에는 별도 워터마크(마지막 처리 시각/ID) 관리 방식도 검토했지만, Cultivation Service DB에 `harvest.is_embedded`(boolean) 컬럼을 두어 AI Service가 단순 조회만 하도록 단순화했습니다 — 이 논의 초반에는 "AI Service가 직접 오케스트레이션하는 게 맞는지"도 다시 짚었는데, 사용자의 원래 설계 의도("스케줄링이 돌면서... 즉시 임베딩 서비스로 가서...")대로 AI Service가 오케스트레이터 역할을 하는 것으로 확정했습니다.
+- Cultivation Service에 내부용 엔드포인트 3종(`GET /api/v1/harvests/unembedded-count`, `GET /api/v1/harvests/unembedded`, `PATCH /api/v1/harvests/embedded`)과, 진행 중인 재배도 조회 가능한 `GET /api/v1/cultivations/{cultivationId}/environment-average`를 추가했습니다. 환경값은 기간 가중 평균(각 설정값이 적용된 기간의 길이로 가중)으로 계산하며, 별도 컬럼에 저장하지 않고 조회 시점마다 계산합니다. **(결정 사항 24번에서 `environment-average` 조회는 Sensor Service로 이관되었고, AI Service의 배치 적재용으로 여러 건을 한 번에 조회하는 `POST /api/v1/sensors/environment-averages` 배치 엔드포인트도 새로 추가되었습니다. `unembedded-count`/`unembedded`/`embedded`는 그대로 Cultivation Service에 남아 있습니다.)**
+- 임베딩되는 "사례"는 버섯 종류 + 기간 가중 평균 환경값(온도/습도/CO₂/조도) + `growth_record`의 생육 점수 + 수확량을 조합합니다.
+- Embedding Service에 내부용 엔드포인트 2종(`POST /api/v1/embeddings/insights` 배치 임베딩, `POST /api/v1/embeddings/insights/search` 유사 사례 검색)을 추가했습니다. 검색은 기존 챗봇 유사 사례 검색(Cosine Similarity Vector Search)과 달리, 버섯 종류(정확히 일치) + 온도(오차 범위)의 term/range 필터 기반입니다.
+- Elasticsearch에 `cultivation_insight` 인덱스를 신설했습니다. `mushroom_environment`(5종 고정 참조 데이터, 이벤트 기반 갱신)와 달리 완료된 재배가 계속 쌓이는 이력성 인덱스이며, 스케줄러 기반 배치로 적재됩니다.
+- 조회 결과는 Redis(`ai:{cultivationId}:insight`, TTL 24시간)에 캐시합니다. 다른 AI 캐시(챗봇/리포트/가이드)는 모두 push로 미리 채워지지만, 인사이트만 유일하게 사용자 요청 시점(pull)에 채워지는 캐시입니다. 유사 사례가 없어 고정 문구로 응답한 경우는 캐시하지 않습니다(다음 배치 이후 매칭될 수 있으므로).
+- RabbitMQ 이벤트를 발행하지 않습니다. 배치 임베딩은 스케줄러가 OpenFeign으로 직접 오케스트레이션하고, 조회는 사용자 요청에 대한 동기 응답이라 별도 알림이 필요하지 않기 때문입니다(일일 피드백의 `DailyFeedbackCompletedEvent`와 다른 점).
+- (자세한 내용은 [insight.md](./04_sequence/insight.md), [cultivation-db.md](./03_Database/cultivation-db.md), [cultivation-api.md](./02_API/cultivation-api.md), [cultivation.md](./01_Domain/cultivation.md), [ai.md](./01_Domain/ai.md), [ai-api.md](./02_API/ai-api.md), [embedding.md](./01_Domain/embedding.md), [embedding-api.md](./02_API/embedding-api.md), [elasticSearch.md](./03_Database/elasticSearch.md), [redis.md](./03_Database/redis.md), [database-overview.md](./03_Database/database-overview.md) 참고)
+
+### 24. `sensor`/`environment_setting` 테이블과 그 API를 Cultivation Service에서 Sensor Service로 완전히 이관했다
+
+팀원들과의 회의 결과, 결정 사항 10번에서 Cultivation Service로 옮겼던 센서 "장치" 메타데이터(`sensor`)와,
+처음부터 Cultivation DB에 있던 목표 환경/위험 한계값 이력(`environment_setting`)을 **Sensor Service로
+다시 이관**하기로 했습니다. 측정값(Redis/InfluxDB)을 이미 소유한 서비스가 장치 메타데이터와 그 장치가
+쓰는 목표 범위까지 함께 갖는 것이 "센서 관련 데이터는 Sensor Service"라는 경계에 더 맞는다고 판단했습니다.
+DB뿐 아니라 **API 소유권도 함께 완전히 이관**했습니다(Cultivation Service가 내부적으로 프록시하는 방식은
+채택하지 않았습니다) — Sensor Service가 처음으로 PostgreSQL을 갖게 되었습니다.
+
+- **DB 이관**: `sensor`, `environment_setting` 테이블이 Cultivation DB에서 새로 만든 Sensor DB로 옮겨졌습니다. 기존과 동일하게 `cultivation_id`는 실제 FK가 아닌 일반 BIGINT 컬럼입니다(Cultivation Service의 `cultivation.user_id`가 Auth Service의 `users.id`를 FK 없이 참조하던 것과 같은 패턴 — 서로 다른 DB이므로 DB 레벨 FK 자체가 불가능합니다). 자세한 DDL은 [sensor-db.md](./03_Database/sensor-db.md) 참고.
+- **재배 생성 시 센서 등록은 그대로 `POST /cultivations`의 `devices`로 처리하되, 이제 하나의 로컬 트랜잭션이 아닙니다.** Cultivation Service가 `cultivation` 행을 먼저 만든 뒤, Sensor Service의 내부용 배치 등록 엔드포인트(`POST /api/v1/sensors/cultivations/{cultivationId}/batch`)를 OpenFeign으로 동기 호출합니다. 이 호출이 실패하면(예: `device_eui` 중복) Cultivation Service가 방금 만든 `cultivation` 행을 **보상 삭제(compensating delete)**합니다. 진짜 분산 트랜잭션(2PC 등)은 아니며, 실패 시 되돌리는 saga-lite 패턴임을 문서에 명시했습니다.
+- **`ON DELETE CASCADE`를 이벤트로 대체**했습니다. 같은 DB 안에 있을 때는 재배 삭제 시 `sensor`/`environment_setting`이 CASCADE로 자동 삭제됐지만, 이제 다른 DB라 불가능합니다. 대신 Cultivation Service가 재배 삭제 시 새 `CultivationDeletedEvent`를 발행하고, Sensor Service가 이를 구독해 해당 `cultivation_id`의 `sensor`/`environment_setting` 행을 보상 삭제합니다.
+- **소유권 검증도 API로 대체**했습니다. 같은 DB에서는 `cultivation_id`로 그냥 조인해서 소유자를 확인할 수 있었지만, 이제 Sensor Service가 쓰기 작업(개별 센서 등록/삭제, 환경 설정 저장) 전에 Cultivation Service의 새 내부용 엔드포인트 `GET /api/v1/cultivations/{cultivationId}/owner`(`{userId, status}` 반환)를 호출해 소유자를 확인합니다. 단, 배치 등록 경로는 예외입니다 — 호출 주체 자체가 Cultivation Service이므로 소유권 확인이 이미 보장되어 있어 생략합니다.
+- **이벤트 발행 주체가 바뀌었습니다.** `SensorRegisteredEvent`/`SensorDeletedEvent`/`EnvironmentRangeUpdatedEvent`는 이제 Sensor Service가 발행합니다(구독자는 각각 DatasourceGenerator, DatasourceGenerator, Rule Engine Service로 기존과 동일). Rule Engine Service가 발행하는 `SensorErrorEvent`(센서 상태 갱신용)의 구독 주체는 Cultivation Service에서 Sensor Service로 바뀌었습니다.
+- **환경 저장이 더 이상 재배 상태 전환과 한 트랜잭션이 아니게 되면서, CREATED → RUNNING 전환을 이벤트 기반으로 바꿨습니다.** 기존에는 "환경 저장 + 재배 상태를 CREATED에서 RUNNING으로" 자체가 Cultivation Service 내부의 한 트랜잭션이었지만, `environment_setting`이 Sensor Service로 이관되며 더 이상 불가능해졌습니다. 대신 Cultivation Service가 `EnvironmentRangeUpdatedEvent`를 구독해, 해당 재배에 대해 이 이벤트를 처음 받는 시점에 상태를 CREATED → RUNNING으로 전환합니다(이미 RUNNING/FINISHED면 아무 동작 없음 — 멱등).
+- **Rule Engine Service의 Redis 캐시 미스 fallback 대상이 Cultivation Service에서 Sensor Service로 바뀌었습니다.** (결정 사항 7번 참고) 목표 환경 범위 캐시가 없을 때만 예외적으로 호출하는 대상이 이제 Sensor Service입니다.
+- **AI Service의 환경 이력/평균 조회도 모두 Sensor Service로 옮겨졌습니다.** Daily Scheduler의 환경 변경 이력 조회, Insight Batch Scheduler의 환경 평균 조회가 모두 Sensor Service를 호출합니다. Insight Batch Scheduler는 재배 여러 건을 한 번에 조회해야 해서, N+1 호출을 피하기 위한 새 배치 엔드포인트 `POST /api/v1/sensors/environment-averages`(`cultivationIds` 배열 요청 → 평균 배열 응답, `environment_setting` 이력이 없는 재배는 결과에서 조용히 제외)를 Sensor Service에 추가했습니다.
+- **인사이트 조회 시 `mushroomType`을 얻는 경로가 바뀌면서, 기존에 없던 자잘한 틈을 하나 발견해 함께 메웠습니다.** 기존에는 Cultivation Service의 환경 평균 조회 API가 `mushroomType`과 환경 평균을 함께 응답해줬는데, 환경 평균이 Sensor Service로 넘어가면서(Sensor Service는 `cultivation.mushroom_type`에 접근할 수 없어 이 값을 모릅니다) 두 값을 각각 다른 서비스에서 받아와야 하게 됐습니다. 그런데 확인해보니 Cultivation Service의 재배 상세 조회(`GET /{cultivationId}`) 응답에는 애초에 `mushroomType`이 없었습니다(이번 이관과 무관한 기존 누락). 이 참에 `mushroomType` 필드를 이 응답에 추가했고, AI Service는 이제 mushroomType은 Cultivation Service, 환경 평균은 Sensor Service, 이렇게 두 번 나눠 호출합니다.
+- **에러 코드가 재정리되었습니다.** cultivation-api.md의 에러 코드가 C001~C009에서 **C001~C005**로 줄었고(센서/환경 관련 코드 제거 + 배치 등록 실패용 신규 C005 추가), 그만큼 sensor-api.md에 **S007~S011**이 새로 추가되었습니다.
+- 이 결정은 결정 사항 10번(센서 장치 CRUD를 DatasourceGenerator → Cultivation Service로), 결정 사항 12번(DatasourceGenerator 캐시 재구성용 전체 목록 조회를 Cultivation Service에 추가) 등 과거 결정의 "소유 서비스" 부분을 뒤집습니다. 필드 구조(device_eui 등, 결정 사항 11번)나 범위 저장 방식(결정 사항 6번), 항목별 이력 구조(결정 사항 22번) 등 "설계 자체"는 그대로 유지되며, 옮겨간 곳이 바뀌었을 뿐입니다.
+- (자세한 내용은 [sensor.md](./01_Domain/sensor.md), [sensor-api.md](./02_API/sensor-api.md), [sensor-db.md](./03_Database/sensor-db.md), [cultivation.md](./01_Domain/cultivation.md), [cultivation-api.md](./02_API/cultivation-api.md), [cultivation-db.md](./03_Database/cultivation-db.md), [create-cultivation.md](./04_sequence/create-cultivation.md), [daily-feedback.md](./04_sequence/daily-feedback.md), [insight.md](./04_sequence/insight.md), [rule-Engine.md](./01_Domain/rule-Engine.md), [rule-engine-api.md](./02_API/rule-engine-api.md), [ai.md](./01_Domain/ai.md), [ai-api.md](./02_API/ai-api.md), [datasource-generator.md](./01_Domain/datasource-generator.md), [datasource-generator-api.md](./02_API/datasource-generator-api.md), [datasource-generator-db.md](./03_Database/datasource-generator-db.md), [redis.md](./03_Database/redis.md), [database-overview.md](./03_Database/database-overview.md), [architecture.md](./00_Project/architecture.md) 참고)
+
 ---
 
 # ✅ 해결된 이슈
 
-- ~~`/api/v1/sensors` 경로 충돌~~ — DatasourceGenerator(장치 등록)와 Sensor Service(측정값 조회)가 같은 경로 프리픽스를 썼던 문제였습니다. 센서 장치 CRUD가 Cultivation Service(`/api/v1/cultivations/{id}/sensors`)로 이전되며 해소되었습니다. (결정 사항 10번 참고)
+- ~~`/api/v1/sensors` 경로 충돌~~ — DatasourceGenerator(장치 등록)와 Sensor Service(측정값 조회)가 같은 경로 프리픽스를 썼던 문제였습니다. 센서 장치 CRUD가 Cultivation Service(`/api/v1/cultivations/{id}/sensors`)로 이전되며 해소되었습니다. (결정 사항 10번 참고. **단, 결정 사항 24번에서 센서 장치 CRUD가 다시 Sensor Service로 이관되며 경로도 `/api/v1/sensors/cultivations/{id}`로 바뀌었습니다 — 원래의 경로 충돌 자체는 여전히 발생하지 않습니다, 새 경로 체계는 [sensor-api.md](./02_API/sensor-api.md) 개요 참고.**)
 
 ---
 

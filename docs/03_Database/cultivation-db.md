@@ -7,9 +7,8 @@ Cultivation Database는 사용자의 버섯 재배 정보를 관리합니다.
 하나의 Cultivation은 하나의 재배를 의미하며,
 재배 생성 시 추천되는 환경값은 별도로 저장되지 않습니다.
 
-사용자가 추천값을 수정하거나 그대로 적용하여 저장 버튼을 눌렀을 때만
-Environment Setting이 생성됩니다. 이때 API로 주고받는 단일 목표값은 Cultivation Service에 의해
-범위(min~max)로 변환되어 저장됩니다.
+사용자가 저장하는 목표 환경값(Environment Setting)과 센서 장치 메타데이터(Sensor)는 더 이상 이
+DB에 저장되지 않습니다. Sensor Service 소유의 [sensor-db.md](./sensor-db.md)를 참고하세요.
 
 재배 종료 후에는 Harvest 정보를 저장합니다.
 
@@ -67,6 +66,25 @@ Environment Setting이 생성됩니다. 이때 API로 주고받는 단일 목표
 > `cultivation`과의 관계도 1:1에서 1:N으로 바뀌었습니다. (자세한 내용은 아래 "environment_setting"
 > 섹션, [daily-feedback.md](../04_sequence/daily-feedback.md) 참고)
 
+> ℹ️ **변경 이력**: "인사이트" 기능(같은 버섯 종류 + 유사한 온도로 재배했던 타인의 사례를 바탕으로
+> 피드백을 주는 기능) 추가를 위해 `harvest` 테이블에 `is_embedded` 컬럼을 추가했습니다. AI Service가
+> 매일 00시 배치로 "아직 임베딩되지 않은 수확 건수"를 조회해야 하는데, AI Service가 별도의 워터마크를
+> 관리하는 대신 Cultivation Service가 "임베딩 여부"를 단순 boolean 컬럼으로 소유하고 AI Service는
+> 조회만 하는 방식으로 설계했습니다. (자세한 내용은 [insight.md](../04_sequence/insight.md),
+> [ai.md](../01_Domain/ai.md) 참고)
+
+> ℹ️ **변경 이력**: 팀 회의 결과, `sensor`와 `environment_setting` 두 테이블을 Cultivation DB에서
+> **Sensor Service 소유의 새 DB([sensor-db.md](./sensor-db.md))로 이전**했습니다. Sensor
+> Service가 이미 센서 측정값(InfluxDB/Redis)과 통계/차트/리포트를 전담하고 있어, 센서 장치
+> 메타데이터와 목표 환경(위험 한계값)까지 함께 소유하는 것이 "database per service" 원칙에
+> 더 맞는다고 판단했습니다. API(등록/조회/삭제/환경 저장)도 테이블과 함께 완전히 이관되었고,
+> Cultivation Service는 재배 생성 시 `devices`를 함께 등록하는 기존 흐름을 유지하기 위해
+> Sensor Service를 OpenFeign으로 호출합니다(더 이상 하나의 로컬 트랜잭션이 아니며, 실패 시
+> 보상 삭제로 처리). 이제 Cultivation DB는 `mushroom_reference`/`cultivation`/`harvest`/
+> `photo`만 소유합니다. (자세한 내용은 [sensor-db.md](./sensor-db.md),
+> [cultivation-api.md](../02_API/cultivation-api.md), [sensor.md](../01_Domain/sensor.md),
+> [README.md](../README.md)의 결정 사항 #24 참고)
+
 ---
 
 # ERD
@@ -110,21 +128,6 @@ PK  id
           │
           │
           ▼
-environment_setting  (1:N — cultivation당 여러 row, 항목별 × 이력별)
-──────────────────────────────────────────────
-PK  id
-FK  cultivation_id
-    type
-    min
-    max
-    unit
-    created_at
-    updated_at
-
-          │ 1
-          │
-          │
-          ▼
 harvest
 ──────────────────────────────────────────────
 PK  id
@@ -132,6 +135,7 @@ FK  cultivation_id
     harvest_weight
     memo
     harvested_at
+    is_embedded
 
           │ 1
           │
@@ -144,19 +148,11 @@ FK  cultivation_id
     image_url
     uploaded_at
     created_at
-
-cultivation (1) ──── (N) sensor  ※ 위 체인과 별도로 cultivation에서 바로 분기
-──────────────────────────────────────────────
-PK  device_eui
-FK  cultivation_id
-    place
-    location
-    device_model
-    sensor_type
-    status
-    created_at
-    updated_at
 ```
+
+`sensor`/`environment_setting`은 더 이상 이 DB에 없습니다. Sensor Service 소유의
+[sensor-db.md](./sensor-db.md)를 참고하세요. `cultivation.id`를 참조하지만 DB가 분리되어
+FK는 없습니다.
 
 ---
 
@@ -218,42 +214,6 @@ FK  cultivation_id
 
 ---
 
-## environment_setting
-
-사용자가 최종 저장한 환경값을 **범위(min~max)** 로, 항목(type)별 행으로 저장합니다.
-
-단일 목표값이 아닌 범위로 저장하는 이유는 Rule Engine Service의 자동 제어가
-값이 범위를 벗어날 때만 장치를 동작시키고, 범위 안에서는 불필요하게 켜고 끄지 않도록(허용 오차/히스테리시스) 하기 위함입니다.
-
-기존에는 재배(cultivation)당 1행에 8개 컬럼(temp_min/max, humidity_min/max, co2_min/max,
-light_min/max)을 한 번에 담았지만, 지금은 `type`(TEMPERATURE/HUMIDITY/CO2/LIGHT)별로 별도
-행을 갖습니다. 수정할 때도 UPDATE가 아니라 새 행을 INSERT합니다 — 이 테이블 하나가 "현재값"과
-"이력"을 동시에 표현하기 위해서입니다. "현재값"이 필요하면 `(cultivation_id, type)` 기준으로
-가장 최신 행(`created_at DESC LIMIT 1`)을 조회합니다.
-
-mushroom_reference 조회 결과(추천값, 범위 형태)는 그대로 저장하지 않습니다. 사용자가 이 추천값을
-참고해서 **단일 목표값**으로 환경 저장 API(`PATCH /environment`)를 호출하면, 그 시점에
-Cultivation Service가 단일값을 범위로 변환해 저장합니다. 아래 "단일값 → 범위 변환" 참고.
-조회 응답에서 다시 단일값이 필요하면 저장된 범위의 중간값을 계산합니다. (아래 "범위 → 단일값
-역변환" 참고)
-
-| Column | Type | NULL | 설명 |
-|---------|------|------|------|
-| id | BIGSERIAL | X | PK |
-| cultivation_id | BIGINT | X | 재배 (FK) |
-| type | VARCHAR(20) | X | 환경 항목 (TEMPERATURE/HUMIDITY/CO2/LIGHT) |
-| min | DECIMAL(4,1) | X | 하한 |
-| max | DECIMAL(4,1) | X | 상한 |
-| unit | VARCHAR(10) | O | 단위 (예: ℃, %, ppm, lux) |
-| created_at | TIMESTAMP | X | 이 값이 저장된 시각 (= 사실상 "언제 이 값으로 바뀌었는지") |
-| updated_at | TIMESTAMP | X | 생성 시각과 동일하게 유지됨 (아래 "고려 사항" 참고) |
-
-`min`/`max`를 `DECIMAL(4,1)`로 통일했습니다. 기존에는 CO₂/조도가 `INT`였지만, 하나의 컬럼을
-모든 항목이 공유하는 구조라 온도의 소수점 정밀도(예: 15.5℃)를 살리는 쪽으로 맞췄습니다. CO₂/
-조도 값은 정수로 들어와도 `DECIMAL(4,1)`에 그대로 저장됩니다(예: `750.0`).
-
----
-
 ## harvest
 
 재배 종료 후 수확 정보를 저장합니다.
@@ -265,6 +225,12 @@ Cultivation Service가 단일값을 범위로 변환해 저장합니다. 아래 
 | harvest_weight | DECIMAL(8,2) |
 | memo | TEXT |
 | harvested_at | TIMESTAMP |
+| is_embedded | BOOLEAN |
+
+`is_embedded`는 "인사이트" 기능을 위해 이 수확 건이 Elasticsearch `cultivation_insight` 인덱스에
+임베딩되었는지를 나타내는 플래그입니다. 기본값 `FALSE`로 시작하며, AI Service가 배치 임베딩을
+완료한 뒤 `TRUE`로 갱신합니다. 한 번 `TRUE`가 되면 다시 바뀌지 않습니다. (자세한 내용은
+[insight.md](../04_sequence/insight.md) 참고)
 
 ---
 
@@ -281,32 +247,6 @@ Cultivation Service가 단일값을 범위로 변환해 저장합니다. 아래 
 | image_url | VARCHAR(500) |
 | uploaded_at | TIMESTAMP |
 | created_at | TIMESTAMP |
-
----
-
-## sensor
-
-재배에 연결된 센서 장치의 메타데이터를 관리합니다. (기존 DatasourceGenerator DB에서 이전)
-
-센서 등록 시 사용자로부터 받는 정보를 기준으로 설계했습니다. 대리키(BIGSERIAL) 대신
-`device_eui`(장치 고유 식별자)를 PK로 사용하며, 위치 정보(place/location)를 별도
-데이터 소스 엔티티 없이 센서 레코드에 직접 저장합니다.
-
-| Column | Type | Description |
-|---------|------|-------------|
-| device_eui | VARCHAR(32) | PK, 장치 고유 식별자 (LoRaWAN DevEUI, 16자리 hex 문자열) |
-| cultivation_id | BIGINT | 재배 (FK, 같은 DB 내 실제 외래키) |
-| place | VARCHAR(50) | 설치 장소 (예: 1동 A구역) |
-| location | VARCHAR(50) | 세부 위치 |
-| device_model | VARCHAR(100) | 장치 모델명 |
-| sensor_type | VARCHAR(30) | 센서 종류 |
-| status | VARCHAR(20) | 상태 (ONLINE/OFFLINE/ERROR/MAINTENANCE), 시스템이 관리 (사용자 입력 아님) |
-| created_at | TIMESTAMP | 생성일 |
-| updated_at | TIMESTAMP | 수정일 |
-
-`place`/`location`/`device_model`/`sensor_type`은 사용자가 센서 등록 시 직접 입력하는 값이며,
-`status`는 등록 시 기본값(ONLINE)으로 시작해 이후 SensorErrorEvent로만 갱신됩니다.
-`cultivation_id`는 요청 body가 아니라 URL 경로(`/cultivations/{cultivationId}/sensors`)로부터 채워집니다.
 
 ---
 
@@ -411,46 +351,6 @@ CREATE TABLE cultivation (
 
 ---
 
-## environment_setting
-
-```sql
-CREATE TABLE environment_setting (
-
-    id BIGSERIAL PRIMARY KEY,
-
-    cultivation_id BIGINT NOT NULL,
-
-    type VARCHAR(20) NOT NULL,
-
-    min DECIMAL(4,1) NOT NULL,
-
-    max DECIMAL(4,1) NOT NULL,
-
-    unit VARCHAR(10),
-
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT fk_environment_cultivation
-        FOREIGN KEY (cultivation_id)
-        REFERENCES cultivation(id)
-        ON DELETE CASCADE,
-
-    CONSTRAINT chk_environment_type CHECK (type IN (
-        'TEMPERATURE', 'HUMIDITY', 'CO2', 'LIGHT'
-    ))
-
-);
-```
-
-`cultivation_id`에 더 이상 `UNIQUE`를 걸지 않습니다. 항목별로 여러 행이 있고(4종), 수정할
-때마다 새 행이 쌓이기 때문입니다(이력 겸용). `updated_at`은 이 테이블에서 실질적으로 항상
-`created_at`과 같은 값을 갖습니다 — 행을 UPDATE하는 경로가 없기 때문입니다(아래 "고려 사항"
-참고).
-
----
-
 ## harvest
 
 ```sql
@@ -465,6 +365,8 @@ CREATE TABLE harvest (
     memo TEXT,
 
     harvested_at TIMESTAMP NOT NULL,
+
+    is_embedded BOOLEAN NOT NULL DEFAULT FALSE,
 
     CONSTRAINT fk_harvest_cultivation
         FOREIGN KEY (cultivation_id)
@@ -501,44 +403,6 @@ CREATE TABLE photo (
 
 ---
 
-## sensor
-
-```sql
-CREATE TABLE sensor (
-
-    device_eui VARCHAR(32) NOT NULL PRIMARY KEY,
-
-    cultivation_id BIGINT NOT NULL,
-
-    place VARCHAR(50),
-
-    location VARCHAR(50),
-
-    device_model VARCHAR(100),
-
-    sensor_type VARCHAR(30),
-
-    status VARCHAR(20) NOT NULL DEFAULT 'ONLINE',
-
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT fk_sensor_cultivation
-        FOREIGN KEY (cultivation_id)
-        REFERENCES cultivation(id)
-        ON DELETE CASCADE
-
-);
-```
-
-`device_eui`는 BIGSERIAL로 자동 채번하지 않고, 등록 시 사용자가 입력한 장치 고유 식별자를
-그대로 PK로 사용합니다. `place`/`location`/`device_model`/`sensor_type`은 사용자 입력 그대로
-nullable이며, `status`만 시스템이 관리하는 NOT NULL 컬럼입니다. 더 이상 별도 `datasource`
-테이블/FK가 없습니다(폐지됨).
-
----
-
 # Index
 
 ## cultivation
@@ -555,32 +419,22 @@ ON cultivation(status);
 
 ---
 
-## environment_setting
-
-```sql
-CREATE INDEX idx_environment_setting_cultivation_type
-ON environment_setting(cultivation_id, type, created_at DESC);
-```
-
-"재배의 각 항목별 현재값(최신 행)"을 조회하는 것이 가장 흔한 접근 패턴이라, `cultivation_id`
-+ `type` + `created_at DESC` 복합 인덱스 하나로 커버합니다. PostgreSQL의 `DISTINCT ON`을
-활용하면 재배 하나의 "현재 환경 전체"를 한 번의 쿼리로 가져올 수 있습니다.
-
-```sql
-SELECT DISTINCT ON (type) *
-FROM environment_setting
-WHERE cultivation_id = ?
-ORDER BY type, created_at DESC;
-```
-
----
-
 ## harvest
 
 ```sql
 CREATE UNIQUE INDEX uk_harvest_cultivation
 ON harvest(cultivation_id);
 ```
+
+```sql
+CREATE INDEX idx_harvest_unembedded
+ON harvest(is_embedded)
+WHERE is_embedded = FALSE;
+```
+
+"임베딩되지 않은 수확 건수/목록"만 조회하는 것이 유일한 접근 패턴이라, `is_embedded = FALSE`
+조건의 부분 인덱스(Partial Index)로 좁혀 인덱스 크기를 최소화합니다. 임베딩이 끝나 `TRUE`로
+바뀐 행은 이 인덱스에서 자동으로 빠집니다.
 
 ---
 
@@ -598,21 +452,7 @@ ON photo(uploaded_at);
 
 가장 최근 업로드된 사진을 빠르게 조회하기 위해 cultivation_id와 uploaded_at을 함께 사용합니다.
 
----
-
-## sensor
-
-```sql
-CREATE INDEX idx_sensor_cultivation
-ON sensor(cultivation_id);
-```
-
-```sql
-CREATE INDEX idx_sensor_status
-ON sensor(status);
-```
-
-device_eui가 PK이므로 별도 UNIQUE 인덱스는 필요하지 않습니다.
+`sensor` 관련 인덱스는 더 이상 이 DB에 없습니다. [sensor-db.md](./sensor-db.md) 참고.
 
 ---
 
@@ -628,17 +468,7 @@ device_eui가 PK이므로 별도 UNIQUE 인덱스는 필요하지 않습니다.
 
 ---
 
-## sensor
-
-| 값 | 설명 |
-|-----|------|
-| ONLINE | 정상 |
-| OFFLINE | 연결 끊김 |
-| ERROR | 오류 |
-| MAINTENANCE | 점검 중 |
-
-sensor.status는 Rule Engine Service가 발행하는 SensorErrorEvent를 Cultivation Service가 구독해 갱신합니다.
-(기존에는 DatasourceGenerator가 이 이벤트를 구독했지만, sensor 테이블 이전과 함께 구독 주체도 옮겨졌습니다.)
+`sensor.status`는 더 이상 이 DB에 없습니다. [sensor-db.md](./sensor-db.md) 참고.
 
 ---
 
@@ -659,6 +489,10 @@ Cultivation 생성
 
 ↓
 
+devices가 있다면 Sensor Service에 OpenFeign 호출 (배치 등록, `POST /api/v1/sensors/cultivations/{cultivationId}/batch`)
+
+↓
+
 mushroom_reference 조회 (mushroom_type 기준)
 
 ↓
@@ -666,110 +500,35 @@ mushroom_reference 조회 (mushroom_type 기준)
 사용자에게 추천값(범위)으로 반환
 
 ※ mushroom_reference는 Cultivation Service 자체 조회이며, AI Service를 호출하지 않습니다.
-추천값 자체는 아직 environment_setting에 저장하지 않습니다.
+추천값 자체는 environment_setting(Sensor Service 소유)에 저장되지 않습니다. Sensor Service
+배치 등록 호출이 실패하면 Cultivation Service는 방금 생성한 cultivation을 보상 삭제합니다.
+(자세한 내용은 [cultivation-api.md](../02_API/cultivation-api.md)의 "재배 생성",
+[sensor-db.md](./sensor-db.md) 참고)
+
+환경 설정 저장(단일값 → 범위 변환, 범위 → 단일값 역변환)은 더 이상 Cultivation Service의
+책임이 아닙니다. Sensor Service가 담당하며, 변환 기준은 그대로 이전되었습니다. (자세한 내용은
+[sensor-db.md](./sensor-db.md), [sensor.md](../01_Domain/sensor.md) 참고)
 
 ---
 
-## ② 환경 저장
-
-사용자가
-
-온도
-
-습도
-
-CO₂
-
-조도
-
-중 하나 이상을 수정합니다. (API 요청/응답은 단일 목표값 그대로 사용, 항목별로 부분 수정 가능)
-
-↓
-
-저장 버튼 클릭
-
-↓
-
-Cultivation Service가 수정된 항목마다 단일 목표값을 허용 오차만큼 확장하여 범위로 변환
-
-↓
-
-environment_setting에 항목별로 새 행 INSERT (수정되지 않은 항목은 기존 최신 행 그대로 유지)
-
-타입별 행 구조라, 예를 들어 사용자가 온도만 바꾸면 `type = 'TEMPERATURE'`인 행 하나만 새로
-INSERT되고 습도/CO₂/조도의 최신 행은 그대로 남습니다. (자세한 내용은 위 "environment_setting"
-테이블 설명 참고)
-
-### 단일값 → 범위 변환 기준 (기본값)
-
-| 항목 (type) | 허용 오차 | 예시 (목표값 → 저장 범위) |
-|------|-----------|---------------------------|
-| TEMPERATURE | ±1.5℃ | 22℃ → min 20.5 / max 23.5 |
-| HUMIDITY | ±5% | 90% → min 85 / max 95 |
-| CO2 | ±50ppm | 800ppm → min 750 / max 850 |
-| LIGHT | ±30lux | 350lux → min 320 / max 380 |
-
-허용 오차 값은 재배 환경 저장 API 요청/응답에는 노출되지 않으며, Cultivation Service 내부 저장 로직에만 적용됩니다.
-값은 향후 버섯 종류별로 다르게 조정될 수 있습니다.
-
-### 범위 → 단일값 역변환 (조회 시)
-
-environment_setting에는 min/max만 저장되며, 사용자가 입력했던 단일 목표값은 별도 컬럼으로 저장하지
-않습니다. `GET /cultivations/{id}` 등 조회 API가 단일값을 응답해야 할 때는 항목별 **최신 행**을
-조회한 뒤, 그 범위의 **중간값**을 계산해서 사용합니다.
-
-```
-단일값 = (min + max) / 2
-```
-
-허용 오차가 항상 대칭(±고정값)으로 적용되므로, 이 중간값은 사용자가 원래 입력했던 단일 목표값과
-정확히 일치합니다. 예시: `type = 'TEMPERATURE'`의 최신 행이 min 20.5 / max 23.5 → (20.5+23.5)/2 = 22.0℃ (원본 입력값과 동일)
-
-이 계산은 Cultivation Service가 조회 시점에 매번 수행하며, 별도로 캐싱하거나 추가 컬럼에
-저장하지 않습니다.
-
----
-
-## ③ 재배 종료
+## ② 재배 종료
 
 재배 종료
 
 ↓
 
-Harvest 생성
+Harvest 생성 (is_embedded = FALSE로 초기화)
 
 ↓
 
 재배 상태 변경
 
----
+수확 시점에는 임베딩이 즉시 일어나지 않습니다. `is_embedded`는 이후 AI Service의 00시 배치
+스케줄러가 미임베딩 건수를 모아 임계치(20개) 이상일 때 일괄 처리한 뒤에만 `TRUE`로 바뀝니다.
+(자세한 내용은 [insight.md](../04_sequence/insight.md) 참고)
 
-## ④ 센서 등록/삭제
-
-사용자가
-
-- device_eui (장치 고유 식별자)
-- place (설치 장소)
-- location (세부 위치)
-- device_model (장치 모델명)
-- sensor_type (센서 종류)
-
-를 입력해 재배에 센서를 등록합니다. cultivation_id는 URL 경로에서 채워지며, status는
-시스템이 ONLINE으로 초기화합니다.
-
-↓
-
-sensor 생성 (device_eui가 PK, cultivation_id는 실제 FK)
-
-↓
-
-RabbitMQ Publish (SensorRegisteredEvent)
-
-↓
-
-DatasourceGenerator가 구독하여 자체 sensor_cache에 반영 (시뮬레이션 데이터 생성 대상 목록)
-
-삭제 시에는 sensor 레코드를 삭제하고 SensorDeletedEvent를 발행해 동일하게 반영합니다.
+센서 등록/삭제와 환경 저장 흐름은 더 이상 이 DB의 책임이 아닙니다. [sensor-db.md](./sensor-db.md)
+참고.
 
 ---
 
@@ -786,11 +545,7 @@ userId
 
 Cultivation
 
-↓ (1:N — 항목별 × 이력별 여러 row)
-
-Environment Setting
-
-↓
+↓ (1:1)
 
 Harvest
 
@@ -799,11 +554,13 @@ Harvest
 Photo (RUNNING 기간 중 언제든 업로드 가능)
 
 
-Cultivation ── (1:N) ── Sensor
+Cultivation ── (cultivation_id, FK 없음) ── Sensor Service (sensor-db.md: sensor, environment_setting)
 
-Sensor 등록/삭제 이벤트는 DatasourceGenerator(sensor_cache)로,
-SensorErrorEvent(Rule Engine Service 발행)는 Cultivation Service(sensor.status)로 전달됩니다.
-별도 datasource 엔티티는 더 이상 존재하지 않습니다(place/location을 sensor에 직접 저장).
+Cultivation Service는 재배 생성 시 Sensor Service를 OpenFeign으로 호출해 devices를 배치
+등록하고(실패 시 cultivation 보상 삭제), 재배 삭제 시 CultivationDeletedEvent를 발행해 Sensor
+Service가 해당 cultivation_id의 sensor/environment_setting을 정리하도록 합니다. Sensor Service는
+쓰기 요청 시 Cultivation Service의 `GET /api/v1/cultivations/{cultivationId}/owner`로 소유권을
+확인합니다. (자세한 내용은 [sensor-db.md](./sensor-db.md) 참고)
 
 
 mushroom_reference (관리자 등록/수정, cultivation과 FK 없음)
@@ -827,6 +584,24 @@ AI Service가 OpenFeign으로 조회 (`GET /api/v1/mushroom-references/{mushroom
 ↓
 
 LLM 프롬프트에 RAG 컨텍스트로 삽입 → "버섯 가이드"(효능/주의사항) 응답 생성
+
+
+harvest.is_embedded (인사이트 기능용)
+
+↓
+
+AI Service가 OpenFeign으로 조회
+  - GET /api/v1/harvests/unembedded-count (미임베딩 건수)
+  - GET /api/v1/harvests/unembedded (미임베딩 목록 + 환경 평균)
+  - PATCH /api/v1/harvests/embedded (임베딩 완료 처리)
+
+↓
+
+Embedding Service (Elasticsearch cultivation_insight 인덱스에 저장)
+
+Cultivation Service는 "임베딩되었는지 여부"만 소유하며, 임베딩 자체와 Elasticsearch 저장/검색은
+전적으로 Embedding Service의 책임입니다. (자세한 내용은 [insight.md](../04_sequence/insight.md),
+[embedding.md](../01_Domain/embedding.md) 참고)
 ```
 
 ---
@@ -834,21 +609,14 @@ LLM 프롬프트에 RAG 컨텍스트로 삽입 → "버섯 가이드"(효능/주
 # 고려 사항
 
 - 추천 환경(mushroom_reference 조회 결과)은 Database에 별도로 저장하지 않습니다.
-- 사용자가 저장한 환경(environment_setting)만 저장합니다.
-- mushroom_reference는 "최적 생육 범위"(참고용 추천 데이터), environment_setting은 "위험 한계값"(실제 자동 제어 기준)으로 목적이 다릅니다. Rule Engine Service는 mushroom_reference를 직접 참조하지 않고, 항상 environment_setting(및 그 Redis 캐시)만 사용합니다.
+- 사용자가 저장하는 목표 환경(environment_setting)과 센서 장치 메타데이터(sensor)는 Sensor Service 소유의 DB로 이전되어 더 이상 이 Database에 저장되지 않습니다. 설계 근거(범위 저장, INSERT-only 이력, device_eui PK 등)는 [sensor-db.md](./sensor-db.md)를 참고하세요.
 - mushroom_reference는 cultivation_id가 없는 전역 테이블이며, 버섯 종류가 5종으로 고정되어 있어 관리자가 값을 갱신하기 전까지 정적으로 유지됩니다.
 - mushroom_reference에는 이름(한글/영문/학명), 특성, 효능, 재배 가이드, 추가 정보 컬럼도 함께 있지만, 이 값들의 임베딩(벡터)은 이 테이블에 저장하지 않습니다. Elasticsearch와 데이터를 중복 저장하지 않기 위해서이며, 임베딩 계산과 보관은 Embedding Service/Elasticsearch의 책임입니다.
 - mushroom_reference가 생성/수정되면 `MushroomReferenceUpdatedEvent`를 발행해 Embedding Service가 Elasticsearch 인덱스를 갱신하도록 합니다. 데이터가 정적이라 이 이벤트는 관리자가 참조 데이터를 등록/수정할 때만 드물게 발생합니다.
 - characteristics/health_benefits/cultivation_guide/additional_info는 AI Service가 "버섯 가이드" 기능에서 LLM 프롬프트의 RAG 컨텍스트로만 사용하며, 그대로 응답에 노출하지 않습니다.
-- environment_setting은 단일 목표값이 아닌 범위(min~max)로 저장합니다. Rule Engine Service가 범위를 벗어날 때만 장치를 제어하도록 하여 불필요한 On/Off를 줄이기 위함입니다.
-- 단일값 → 범위 변환은 Cultivation Service 내부 로직이며, API 요청/응답 스펙에는 영향을 주지 않습니다.
-- 반대로 조회 시 단일값이 필요하면 항목별 최신 행의 범위에서 중간값 `(min+max)/2`를 계산합니다. 허용 오차가 대칭이므로 이 값은 사용자가 원래 입력했던 단일값과 정확히 일치하며, 별도 컬럼에 원본값을 중복 저장하지 않습니다.
-- Environment Setting은 Cultivation당 항목(TEMPERATURE/HUMIDITY/CO2/LIGHT)별로 여러 행이 쌓이며, UPDATE 없이 항상 INSERT만 합니다. 이 테이블 하나가 "현재값"(항목별 최신 행)과 "이력"(전체 행)을 동시에 표현합니다. `updated_at` 컬럼은 두었지만 UPDATE 경로가 없어 실질적으로 `created_at`과 항상 같습니다.
-- 데이터가 무한히 쌓이는 이력성 테이블이라, 운영 단계에서는 오래된 이력에 대한 보관 주기 정책이 필요할 수 있습니다(추후 개발 예정).
 - Harvest는 재배 종료 후에만 생성됩니다.
-- 센서 "장치" 메타데이터(sensor 테이블)는 Cultivation DB(PostgreSQL)에 저장하지만, 센서가 측정한 "값"(시계열)은 Sensor Service의 InfluxDB에서 관리하며 이 DB에는 저장하지 않습니다. 두 "sensor"는 서로 다른 데이터입니다.
-- sensor.device_eui는 대리키가 아닌 사용자가 입력하는 장치 고유 식별자를 그대로 PK로 사용합니다.
-- 별도 datasource 테이블/엔티티는 존재하지 않습니다. 위치 정보(place/location)는 센서 레코드에 직접 저장하며, 여러 센서가 같은 place/location 값을 자유롭게 공유할 수 있습니다(정규화하지 않음).
+- `harvest.is_embedded`는 "인사이트" 기능(타인의 유사 재배 사례 기반 피드백)을 위한 플래그이며, 기본값 `FALSE`로 시작해 AI Service의 배치 임베딩이 끝난 뒤에만 `TRUE`로 바뀝니다. 임베딩 자체(텍스트 요약 생성, 벡터화, Elasticsearch 저장)는 Cultivation Service가 아닌 Embedding Service의 책임이며, Cultivation Service는 "여부"만 소유합니다.
+- `is_embedded` 판단을 위한 환경 평균값(기간 가중 평균)은 더 이상 Cultivation Service가 계산하지 않습니다. environment_setting이 Sensor Service로 이전되면서, AI Service의 인사이트 배치 스케줄러가 Cultivation Service(미임베딩 수확 목록)와 Sensor Service(`POST /api/v1/sensors/environment-averages`, 환경 평균 일괄 조회)를 각각 호출해 조합합니다. (자세한 내용은 [insight.md](../04_sequence/insight.md), [sensor-db.md](./sensor-db.md) 참고)
 - 사진 원본 파일은 PostgreSQL이 아닌 MinIO에 저장하고, image_url만 저장합니다.
 - 사진은 카메라 센서가 아닌 사용자가 직접 촬영하여 업로드합니다.
 - 하나의 재배(cultivation)에는 여러 장의 photo가 누적될 수 있습니다.

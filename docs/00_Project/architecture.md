@@ -17,8 +17,11 @@ Sensor Service(저장·조회)로 다시 분리했습니다.
 - Notification Service
 - DatasourceGenerator (기존 Datasource Service 리네임)
 
-Rule Engine Service와 Sensor Service는 RabbitMQ(EnvironmentMeasuredEvent)로만 연결되며
-서로 직접 호출하지 않습니다.
+Rule Engine Service와 Sensor Service는 기본적으로 RabbitMQ(EnvironmentMeasuredEvent)로
+연결됩니다. 단, 목표 환경 범위(environment_setting) Redis 캐시가 없을 때(TTL 만료, 재시작
+직후 등)에만 Rule Engine Service가 Sensor Service를 OpenFeign으로 예외적으로 호출하는
+fallback이 있습니다(팀 회의 결과 `environment_setting`이 Sensor Service로 이관되며 fallback
+대상이 Cultivation Service에서 바뀌었습니다).
 
 ---
 
@@ -28,6 +31,7 @@ Rule Engine Service와 Sensor Service는 RabbitMQ(EnvironmentMeasuredEvent)로�
 
 - Auth (users 단일 테이블)
 - Cultivation
+- Sensor (센서 장치 메타데이터, 목표 환경/위험 한계값 이력 — Cultivation DB에서 이관)
 - Notification (알림 이력)
 - AI (챗봇 대화 이력, 생육 분석 이력, 일일 피드백 이력)
 
@@ -137,3 +141,28 @@ AI Service Vision 모델
 ↓
 
 LLM (결과 해석 및 개선 방안 생성)
+
+---
+
+### 인사이트 (타인의 유사 재배 사례 기반 피드백)
+
+배치 임베딩 적재 (AI Service, 매일 00시, 완료된 재배가 20건 이상 쌓였을 때)
+
+↓
+
+Embedding Service (임베딩 후 Elasticsearch 저장)
+
+↓
+
+사용자 요청 시 (조회, 배치와 별개)
+
+↓
+
+Embedding Service (버섯 종류 + 온도 오차 범위로 검색)
+
+↓
+
+LLM (유사 사례 요약)
+
+일일 피드백(자기 자신의 이력 비교)과 달리 타인의 사례와 비교하며, 스케줄 기반 push가 아닌
+사용자 요청 시점(on-demand)에만 조회됩니다.

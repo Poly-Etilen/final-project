@@ -9,6 +9,14 @@
 추천합니다. 이후 사용자가 버섯 가이드(효능/주의사항, AI Service)를 확인하고, 추천값을 참고해
 직접 환경 설정(위험 한계값)을 입력하고 저장하면 재배가 시작됩니다.
 
+> ℹ️ **변경 이력**: 팀 회의 결과 `sensor`/`environment_setting` 테이블과 관련 API가
+> Cultivation Service에서 Sensor Service로 완전히 이관되었습니다. `devices`로 센서를 함께
+> 등록하는 사용자 흐름 자체는 유지하지만, 더 이상 하나의 로컬 트랜잭션이 아닙니다. 재배
+> 생성 후 Cultivation Service가 Sensor Service를 OpenFeign으로 동기 호출하며, 실패 시 방금
+> 생성한 cultivation을 보상 삭제합니다. 환경 설정 저장/조회도 이제 Sensor Service의 API를
+> 직접 호출합니다. (자세한 내용은 [sensor.md](../01_Domain/sensor.md),
+> [sensor-db.md](../03_Database/sensor-db.md), [README.md](../README.md)의 결정 사항 #24 참고)
+
 > ℹ️ **변경 이력**: 원래는 AI Service(Embedding/Vector Search/LLM)를 호출해 추천값을 생성했지만,
 > 버섯 종류가 공공데이터 기준 5가지로 고정되어 있어 매번 동일한 값이 나오는 조회에는 AI가
 > 불필요하다고 판단, Cultivation Service가 자체 보유한 참조 테이블 조회로 단순화했습니다.
@@ -41,13 +49,12 @@ API Gateway
 
 Cultivation Service
 
-├── mushroom_reference 조회 (mushroomType 기준)
 ├── Cultivation 생성
-└── devices 항목별 sensor 생성 (선택, 하나의 트랜잭션)
+└── mushroom_reference 조회 (mushroomType 기준)
 
 ↓ (디바이스가 있다면)
 
-RabbitMQ Publish (SensorRegisteredEvent, 디바이스별)
+Sensor Service에 OpenFeign 호출 (배치 등록) — 실패 시 Cultivation 보상 삭제
 
 ↓
 
@@ -75,7 +82,7 @@ AI Service — 버섯 가이드 조회 (효능/주의사항, mushroomType 기준
 
 ↓
 
-Cultivation Service — Environment Setting 저장 (범위 변환)
+Sensor Service — Environment Setting 저장 (범위 변환, 소유권 확인 후)
 
 ↓
 
@@ -112,23 +119,28 @@ Rule Engine Service — 위험값(min/max) 이탈 시 장치 제어, 중앙값 �
 }
 ```
 
-`devices`는 생략하거나 빈 배열일 수 있습니다. 이 경우 센서 없이 재배만 생성되며, 이후 별도
-API(`POST /cultivations/{cultivationId}/sensors`)로 추가할 수 있습니다.
+`devices`는 생략하거나 빈 배열일 수 있습니다. 이 경우 센서 없이 재배만 생성되며, 이후 Sensor
+Service의 개별 등록 API(`POST /api/v1/sensors/cultivations/{cultivationId}`)로 추가할 수
+있습니다.
 
 ---
 
 ## 2. Cultivation 생성 + 디바이스 등록
 
-Cultivation Service는 아래를 하나의 트랜잭션으로 처리합니다.
+Cultivation Service는
 
-- 재배 정보 생성 (초기 상태 `CREATED`, 아직 환경 정보는 저장하지 않음)
-- `devices`의 각 항목으로 `sensor` 레코드 생성 (device_eui를 PK로 사용, 서버가 별도 채번하지 않음)
+- 재배 정보를 생성합니다 (초기 상태 `CREATED`, 아직 환경 정보는 저장하지 않음).
+- `devices`가 1개 이상이면 Sensor Service의 배치 등록 엔드포인트를 OpenFeign으로 동기
+  호출합니다 (`POST /api/v1/sensors/cultivations/{cultivationId}/batch`).
 
-`devices`에 이미 등록된 device_eui가 섞여 있으면(C007) 전체가 롤백됩니다(재배 자체가
-생성되지 않음).
+더 이상 하나의 로컬 트랜잭션이 아닙니다. Sensor Service 호출이 실패하면(중복 device_eui
+포함, S007) Cultivation Service는 방금 생성한 cultivation을 보상 삭제(compensating delete)
+하고 에러를 응답합니다. 진짜 분산 트랜잭션은 아니지만, 클라이언트 입장에서는 "전체 성공 또는
+전체 실패"처럼 보입니다.
 
-디바이스가 1개 이상 등록되었다면, 커밋 후 디바이스별로 RabbitMQ `SensorRegisteredEvent`를
-발행합니다. (DatasourceGenerator가 구독해 메모리 캐시를 갱신 — 자세한 내용은
+Sensor Service는 device_eui별로 `sensor` 레코드를 생성하고(device_eui를 PK로 사용, 서버가
+별도 채번하지 않음), 디바이스별로 RabbitMQ `SensorRegisteredEvent`를 발행합니다.
+(DatasourceGenerator가 구독해 메모리 캐시를 갱신 — 자세한 내용은
 [datasource-generator.md](../01_Domain/datasource-generator.md) 참고)
 
 ---
@@ -185,7 +197,8 @@ Client
 ```
 
 사용자는 이 추천 범위를 참고 자료로 확인합니다. `description`은 mushroom_reference의 짧은
-한 줄 문구이며, 다음 단계의 "버섯 가이드"와는 별개입니다.
+한 줄 문구이며, 다음 단계의 "버섯 가이드"와는 별개입니다. `registeredSensors`는 Sensor
+Service 배치 등록 호출의 응답을 Cultivation Service가 그대로 전달(pass-through)한 것입니다.
 
 ---
 
@@ -241,7 +254,16 @@ mushroom_reference의 characteristics/healthBenefits/cultivationGuide/additional
 
 저장 버튼을 누르면
 
-Cultivation Service
+Client는 Sensor Service를 직접 호출합니다 (`PATCH /api/v1/sensors/cultivations/{cultivationId}/environment`).
+
+↓
+
+Sensor Service
+
+↓
+
+Cultivation Service에 OpenFeign 호출 (`GET /api/v1/cultivations/{cultivationId}/owner`)로
+소유권 확인
 
 ↓
 
@@ -263,8 +285,8 @@ Humidity 91% → type=HUMIDITY, min 86 / max 96
 ```
 
 항목별로 새 행이 INSERT됩니다(수정하지 않은 항목은 기존 최신 행 유지). API 요청/응답에는
-단일 목표값만 노출되며, 범위 변환은 Cultivation Service 내부 저장 로직입니다. (자세한 내용은
-[cultivation-db.md](../03_Database/cultivation-db.md) 참고)
+단일 목표값만 노출되며, 범위 변환은 Sensor Service 내부 저장 로직입니다. (자세한 내용은
+[sensor-db.md](../03_Database/sensor-db.md) 참고)
 
 ↓
 
@@ -273,23 +295,35 @@ RabbitMQ Publish (EnvironmentRangeUpdatedEvent)
 ↓
 
 Rule Engine Service가 구독하여 Redis 캐시(cultivation:{cultivationId}:range)를 갱신합니다.
-규칙 평가 시 Cultivation Service를 매번 호출하지 않기 위한 캐시 예열(warm-up) 목적입니다.
+규칙 평가 시 Sensor Service를 매번 호출하지 않기 위한 캐시 예열(warm-up) 목적입니다.
+
+Cultivation Service도 같은 이벤트를 구독합니다. cultivation 상태가 아직 `CREATED`라면 이를
+계기로 `RUNNING`으로 전환합니다(아래 8번 참고). `environment_setting`이 Sensor Service로
+이관되면서 "환경 저장 = 재배 시작"이 더 이상 하나의 로컬 트랜잭션으로 처리될 수 없어, 이벤트
+기반으로 대체했습니다.
+
+> ℹ️ **변경 이력**: 원래 이 단계는 Cultivation Service가 environment_setting 저장과 재배 상태
+> 전환(CREATED → RUNNING)을 하나의 트랜잭션으로 처리했습니다. `environment_setting`이 Sensor
+> Service로 이관되면서 더 이상 같은 DB 트랜잭션으로 묶을 수 없어, Cultivation Service가
+> `EnvironmentRangeUpdatedEvent`를 구독해 상태를 전환하는 방식으로 바꿨습니다. (자세한 내용은
+> [sensor.md](../01_Domain/sensor.md), [cultivation.md](../01_Domain/cultivation.md) 참고)
 
 ---
 
 ## 8. 재배 시작
 
-Cultivation 상태 변경
+Cultivation Service가 `EnvironmentRangeUpdatedEvent`를 구독하여 상태를 변경합니다.
 
 ```
 CREATED
 
-↓
+↓ (EnvironmentRangeUpdatedEvent 최초 수신)
 
 RUNNING
 ```
 
-재배가 시작됩니다.
+재배가 시작됩니다. 이미 `RUNNING`이거나 `FINISHED`인 재배가 환경을 재수정하는 경우(재배
+도중 목표값 조정)에는 상태를 다시 변경하지 않습니다 — `CREATED` 상태일 때만 전환합니다.
 
 ---
 
@@ -322,23 +356,36 @@ environment_setting의 min/max와 비교합니다.
 
 # 사용 Database
 
-## PostgreSQL
+## Cultivation Service — PostgreSQL
 
 ```
 mushroom_reference (조회 전용)
 
 cultivation
+```
 
+## Sensor Service — PostgreSQL
+
+```
 sensor (devices를 함께 등록한 경우)
 
 environment_setting
 ```
 
+> ℹ️ **변경 이력**: `sensor`/`environment_setting`이 Sensor Service 소유의 별도 DB로
+> 이관되면서, 이 시퀀스가 사용하는 Database가 두 서비스에 걸치게 되었습니다.
+
 ---
 
 # OpenFeign
 
-재배 생성/환경 추천 단계에서는 다른 서비스를 호출하지 않습니다. (Cultivation Service 내부 조회로 완결)
+재배 생성/환경 추천 단계 자체(참조 테이블 조회)는 다른 서비스를 호출하지 않습니다. (Cultivation
+Service 내부 조회로 완결)
+
+`devices`가 있는 경우, Cultivation Service는 Sensor Service를 OpenFeign으로 호출합니다
+(`POST /api/v1/sensors/cultivations/{cultivationId}/batch`, 실패 시 보상 삭제). Sensor
+Service는 개별 환경 저장 시 다시 Cultivation Service를 OpenFeign으로 호출해 소유권을
+확인합니다(`GET /api/v1/cultivations/{cultivationId}/owner`).
 
 버섯 가이드는 Client가 AI Service를 직접 호출하며, Cultivation Service를 거치지 않습니다.
 
@@ -351,8 +398,8 @@ environment_setting
 Publish
 
 ```
-SensorRegisteredEvent (devices를 함께 등록한 경우, 디바이스별)
-EnvironmentRangeUpdatedEvent (환경 저장 시점)
+SensorRegisteredEvent (devices를 함께 등록한 경우, 디바이스별, Sensor Service 발행)
+EnvironmentRangeUpdatedEvent (환경 저장 시점, Sensor Service 발행)
 ```
 
 Subscribe
@@ -360,6 +407,7 @@ Subscribe
 ```
 DatasourceGenerator (SensorRegisteredEvent)
 Rule Engine Service (EnvironmentRangeUpdatedEvent, Redis 캐시 갱신)
+Cultivation Service (EnvironmentRangeUpdatedEvent, CREATED → RUNNING 상태 전환)
 ```
 
 ---
@@ -397,11 +445,13 @@ FINISHED
 # 예외 상황
 
 - 존재하지 않는 버섯 종류 (mushroom_reference에 없음)
-- devices에 이미 등록된 device_eui 포함 (재배 생성 자체가 롤백됨)
+- devices에 이미 등록된 device_eui 포함 (Sensor Service 배치 등록 실패 → Cultivation Service가 방금 생성한 cultivation을 보상 삭제)
+- Sensor Service 배치 등록 호출 자체가 실패/타임아웃 (네트워크 오류 등) — 동일하게 보상 삭제 처리
 - 버섯 가이드 조회 실패 (AI Service 오류 — 재배 생성/진행에는 영향 없음, 선택적 단계이므로 건너뛸 수 있음)
-- Environment 저장 실패
+- Environment 저장 실패 (Sensor Service의 Cultivation Service 소유권 확인 실패 포함)
 - DB 저장 실패
-- EnvironmentRangeUpdatedEvent 발행 실패 (Rule Engine Service 캐시가 갱신되지 않으며, Rule Engine Service는 다음 규칙 평가 시 Cultivation Service를 직접 호출하는 fallback으로 동작)
+- EnvironmentRangeUpdatedEvent 발행 실패 (Rule Engine Service 캐시가 갱신되지 않으며, Rule Engine Service는 다음 규칙 평가 시 Sensor Service를 직접 호출하는 fallback으로 동작. Cultivation Service도 이 이벤트로 CREATED → RUNNING 전환을 하므로, 발행 실패 시 상태 전환이 지연될 수 있음)
+- 보상 삭제 자체가 실패하는 극단적인 경우 (별도 모니터링/재시도 대상)
 
 ---
 
@@ -413,7 +463,7 @@ FINISHED
 - 버섯 가이드(효능/주의사항)는 mushroom_reference.description(짧은 참고 문구)과 다른, AI가 생성하는 별도 콘텐츠입니다. 재배 생성 자체와는 독립적인 선택 단계라 실패해도 재배 생성/진행에 영향을 주지 않습니다.
 - 저장 시 단일 목표값은 허용 오차만큼 확장된 범위(min~max)로 변환되어 저장됩니다. API 스펙은 단일값을 그대로 유지합니다.
 - 환경 저장 응답은 EnvironmentRangeUpdatedEvent 발행(비동기)을 기다리지 않고 즉시 반환합니다.
-- 재배는 환경 저장 이후 RUNNING 상태가 됩니다.
+- 재배는 환경 저장 이후 RUNNING 상태가 됩니다. `environment_setting`이 Sensor Service로 이관되면서 이 전환은 더 이상 하나의 로컬 트랜잭션이 아니라, Cultivation Service가 `EnvironmentRangeUpdatedEvent`를 구독해 처리하는 이벤트 기반 전환입니다.
 - 참조 테이블 조회는 Cultivation Service 내부 DB 조회이므로 AI Service/Embedding Service/Elasticsearch에 대한 의존성이 없습니다.
-- 재배 생성과 디바이스 등록은 하나의 트랜잭션이므로, 디바이스 등록이 실패하면 재배도 생성되지 않습니다.
+- 재배 생성과 디바이스 등록은 더 이상 하나의 로컬 트랜잭션이 아닙니다. Cultivation Service가 Sensor Service를 동기 호출하고, 실패 시 보상 삭제로 "전체 성공 또는 전체 실패"에 근접한 동작을 흉내냅니다(진짜 분산 트랜잭션은 아님).
 - 자동 제어는 위험값(min/max) 경계가 아닌 중앙값을 목표로 동작합니다. (9번 참고)

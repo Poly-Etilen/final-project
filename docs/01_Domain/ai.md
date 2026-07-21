@@ -42,12 +42,32 @@ AI Service는 LLM과 RAG(Retrieval-Augmented Generation)를 활용하여 사용�
 > ℹ️ **변경 이력**: "일일 피드백" 기능이 추가되었습니다. 사용자가 재배 환경(온도 등)을
 > 수정했을 때, 그 수정이 실제로 생육에 긍정적이었는지를 매일 알려주는 기능입니다. 이를 위해
 > AI Service에 `growth_record`(생육 분석 결과 이력), `daily_feedback`(일일 피드백 결과)
-> 테이블이 추가되었고, Daily Scheduler가 매일 재배별로 환경 변경 이력(Cultivation Service의
-> `environment_setting`)과 생육 추이(`growth_record`)를 비교해 피드백을 생성합니다. 사용자가
-> 전날 사진을 찍지 않았다면 비교할 데이터가 없으므로, 그 경우에도 피드백 자체는 생성하되
-> 고정된 안내 문구를 남깁니다. (자세한 내용은 [ai-db.md](../03_Database/ai-db.md),
-> [daily-feedback.md](../04_sequence/daily-feedback.md),
-> [cultivation-db.md](../03_Database/cultivation-db.md)의 `environment_setting` 참고)
+> 테이블이 추가되었고, Daily Scheduler가 매일 재배별로 환경 변경 이력(당시 Cultivation
+> Service의 `environment_setting`)과 생육 추이(`growth_record`)를 비교해 피드백을 생성합니다.
+> 사용자가 전날 사진을 찍지 않았다면 비교할 데이터가 없으므로, 그 경우에도 피드백 자체는
+> 생성하되 고정된 안내 문구를 남깁니다. (자세한 내용은 [ai-db.md](../03_Database/ai-db.md),
+> [daily-feedback.md](../04_sequence/daily-feedback.md) 참고)
+
+> ℹ️ **변경 이력**: "인사이트" 기능이 추가되었습니다. "일일 피드백"이 **자기 자신**의 환경
+> 변경 이력과 생육 추이를 비교하는 기능이라면, 인사이트는 **같은 버섯 종류 + 유사한(오차 범위
+> 내) 온도로 재배했던 다른 사용자들**의 완료된 재배 사례를 바탕으로 현재 내 재배 상태를
+> 피드백해주는 기능입니다. 매일 00시에 Insight Batch Scheduler가 돌면서 Cultivation Service에
+> 아직 임베딩되지 않은 수확(harvest) 건수를 조회하고, 전체 합산 20건 이상이면 그 배치를
+> Embedding Service로 보내 임베딩 후 Elasticsearch(`cultivation_insight` 인덱스)에 저장합니다.
+> 조회는 이 배치 적재와 별개로, 사용자가 요청한 시점에만(on-demand) 이루어집니다 — AI Service가
+> Embedding Service를 통해 Elasticsearch에서 유사 사례를 검색하고, LLM이 이를 요약해 보여줍니다.
+> (자세한 내용은 [insight.md](../04_sequence/insight.md),
+> [cultivation-db.md](../03_Database/cultivation-db.md)의 `harvest.is_embedded`,
+> [elasticSearch.md](../03_Database/elasticSearch.md)의 `cultivation_insight` 참고)
+
+> ℹ️ **변경 이력**: 팀 회의 결과 `environment_setting` 테이블이 Cultivation Service에서
+> Sensor Service로 완전히 이관되었습니다. Daily Scheduler의 환경 변경 이력 조회, 인사이트
+> 배치의 환경 평균 조회, 인사이트 on-demand 조회의 현재 재배 환경 평균 조회가 모두
+> Cultivation Service 대신 Sensor Service를 호출하도록 바뀌었습니다. 특히 인사이트 배치
+> 스케줄러는 이제 Cultivation Service(미임베딩 수확 목록)와 Sensor Service(환경 평균
+> 일괄 조회, `POST /api/v1/sensors/environment-averages`)를 각각 호출해 결과를 조합합니다.
+> (자세한 내용은 [sensor.md](./sensor.md), [daily-feedback.md](../04_sequence/daily-feedback.md),
+> [insight.md](../04_sequence/insight.md), [README.md](../README.md)의 결정 사항 #24 참고)
 
 ---
 
@@ -56,6 +76,8 @@ AI Service는 LLM과 RAG(Retrieval-Augmented Generation)를 활용하여 사용�
 - AI 생육 분석
 - AI 챗봇
 - 일일 피드백 생성
+- 인사이트 배치 임베딩 적재 (00시 스케줄러)
+- 인사이트 조회 (타인의 유사 재배 사례 기반)
 - AI 리포트 생성
 - 버섯 가이드(효능/주의사항) 생성
 - 프롬프트 관리
@@ -199,7 +221,7 @@ AI에서 뺀 이유와 같은 문제이지만, 이번에는 수치가 아닌 "�
 Daily Scheduler가 매일 재배별로 아래 두 데이터를 비교합니다.
 
 - `growth_record`(AI Service 자체 DB): 최근 며칠간의 생육 분석 결과 추이
-- `environment_setting`(Cultivation Service): 최근 환경 변경 이력
+- `environment_setting`(Sensor Service): 최근 환경 변경 이력
 
 사진을 찍지 않아 그날의 `growth_record`가 없으면 비교할 데이터가 없으므로, LLM을 호출하지
 않고 "전날 사진이 없어 피드백을 남길 수 없습니다"라는 고정 문구로 피드백을 생성합니다. 이
@@ -216,6 +238,78 @@ Daily Scheduler가 매일 재배별로 아래 두 데이터를 비교합니다.
 ## 일일 피드백 조회
 
 특정 재배에 대해 지금까지 생성된 일일 피드백을 최신순으로 조회합니다.
+
+---
+
+## 인사이트 배치 임베딩 적재
+
+일일 피드백이 "내 재배의 어제와 오늘"을 비교한다면, 인사이트는 "나와 비슷한 조건으로 재배한
+**다른 사람들**"의 완료된 사례를 바탕으로 피드백을 줍니다. 이를 위해서는 먼저 완료된 재배들을
+검색 가능한 형태로 Elasticsearch에 쌓아두어야 하며, 그 적재를 담당하는 것이 Insight Batch
+Scheduler입니다.
+
+매일 00시,
+
+1. Cultivation Service에 아직 임베딩되지 않은 수확(harvest) 건수를 조회합니다
+   (`GET /api/v1/harvests/unembedded-count`).
+2. 전체 사용자를 합산한 값이 20건 이상이면, 그 목록 전체를 가져옵니다
+   (`GET /api/v1/harvests/unembedded`). 20건 미만이면 이번 배치는 건너뛰고 다음 날 다시 확인합니다.
+3. 목록의 cultivationId들을 모아 Sensor Service에 환경 평균을 일괄 조회합니다
+   (`POST /api/v1/sensors/environment-averages`). 기간 가중 평균 온도/습도/CO₂/조도를 받습니다.
+4. 각 건에 대해 AI Service 자신의 `growth_record`에서 생육 점수(마지막 분석 결과)를 조회해 합칩니다.
+5. 조합한 데이터(버섯 종류, 기간 가중 평균 온도/습도/CO₂/조도, 생육 점수, 수확량)를 Embedding
+   Service로 보내 임베딩 및 Elasticsearch 저장을 요청합니다.
+6. 저장에 성공하면 Cultivation Service에 해당 건들을 임베딩 완료로 표시하도록 요청합니다
+   (`PATCH /api/v1/harvests/embedded`).
+
+> ℹ️ **변경 이력**: 환경 평균 조회(3번)는 원래 `GET /api/v1/harvests/unembedded` 응답에
+> Cultivation Service가 미리 계산해서 포함해주던 필드였습니다. `environment_setting`이
+> Sensor Service로 이관되면서 더 이상 Cultivation Service가 계산할 수 없게 되어, 별도
+> 배치 조회 API 호출로 분리했습니다. N+1 호출을 피하기 위해 cultivationId 목록을 한 번에
+> 보내는 배치 엔드포인트를 사용합니다.
+
+이 배치는 "매일 다시 전체를 훑어 재임베딩"하는 방식이 아니라, "임계치(20건)에 도달한 만큼만
+임베딩하고 카운터가 다시 쌓이길 기다리는" 방식입니다. 하루에 여러 번 임계치를 넘을 수도, 며칠간
+한 번도 안 넘을 수도 있습니다.
+
+AI Service가 이 배치의 오케스트레이터 역할을 하지만, 임베딩 계산과 Elasticsearch 저장 자체는
+Embedding Service의 책임입니다. AI Service는 Elasticsearch를 직접 호출하지 않습니다(기존
+버섯 가이드 RAG, 챗봇 유사 사례 검색과 동일한 원칙).
+
+"임베딩되었는지 여부"는 AI Service가 별도로 추적(워터마크)하지 않고, Cultivation Service가
+`harvest.is_embedded` 플래그로 소유합니다. AI Service는 단순 조회/갱신만 합니다.
+
+---
+
+## 인사이트 조회
+
+사용자가 특정 재배에 대해 인사이트를 요청하면(사용자 요청 시점, on-demand — 스케줄링/푸시가
+아님), 같은 버섯 종류이면서 유사한(오차 범위 내) 온도로 재배했던 **타인의 완료된 재배 사례**를
+찾아 현재 내 재배 상태에 대한 피드백을 생성합니다.
+
+1. Cultivation Service에서 재배의 버섯 종류를 조회합니다 (`GET /cultivations/{cultivationId}`).
+2. Sensor Service에서 현재 재배의 환경 평균(기간 가중 평균)을 조회합니다
+   (`GET /api/v1/sensors/cultivations/{cultivationId}/environment-average`). 재배가 아직
+   진행 중이어도 지금까지의 평균으로 조회할 수 있습니다.
+3. Embedding Service에 버섯 종류 + 온도 오차 범위를 조건으로 유사 사례 검색을 요청합니다
+   (Elasticsearch `cultivation_insight` 인덱스 검색).
+4. 매칭된 사례들(평균 환경값, 생육 점수, 수확량)을 LLM에 전달해 자연어 인사이트로 요약합니다.
+5. 결과를 Redis에 캐시하고(`ai:{cultivationId}:insight`) 반환합니다.
+
+> ℹ️ **변경 이력**: 환경 평균과 버섯 종류를 함께 반환하던 Cultivation Service의 단일
+> 엔드포인트(`GET /api/v1/cultivations/{cultivationId}/environment-average`)가
+> `environment_setting` 이관과 함께 사라지면서, 두 값을 각각 Cultivation Service(버섯 종류)와
+> Sensor Service(환경 평균)에서 따로 조회하도록 나뉘었습니다.
+
+유사 사례가 하나도 없으면(예: 아직 그 버섯 종류의 완료된 재배가 20건 미만이라 임베딩된 데이터가
+없는 경우) LLM을 호출하지 않고 "아직 비교할 수 있는 유사 사례가 충분하지 않습니다"라는 고정
+문구로 응답합니다.
+
+### 제공 정보
+
+- 인사이트 요약 문장 (유사 사례 대비 내 재배 상태 해석)
+- 비교에 사용된 유사 사례 수
+- 대상 재배 ID
 
 ---
 
@@ -270,6 +364,16 @@ GET /ai/feedback/daily
 
 ---
 
+## 인사이트 조회
+
+GET /ai/insight
+
+일일 피드백/AI 리포트와 달리 스케줄러가 미리 생성해두지 않으며, 사용자가 이 API를 호출한
+시점에 Embedding Service 검색 + LLM 요약이 즉시 수행됩니다(사용자 요청 시점 처리). 배치
+임베딩 적재(Insight Batch Scheduler)는 이 조회와 별개의 흐름입니다.
+
+---
+
 ## AI 리포트 조회
 
 GET /ai/report
@@ -304,6 +408,8 @@ AI 응답 캐시를 저장합니다.
 - AI 리포트 (Weekly Scheduler가 push로 미리 채워둠, 사용자 요청 시 생성하지 않음)
 - AI 챗봇 응답
 - 버섯 가이드 (mushroomType 기준, cultivationId와 무관)
+- 인사이트 (`ai:{cultivationId}:insight`, 사용자 요청 시점에 채워짐 — 유일하게 push가 아닌
+  요청 시점에 생성되어 캐시되는 항목)
 
 일일 피드백은 Redis에 캐시하지 않습니다. 하루에 한 번만 생성되고 `daily_feedback`에 바로
 영구 저장되므로 별도 캐시가 필요하지 않습니다.
@@ -325,22 +431,39 @@ AI Service는 Vision 분석을 위해 사진을 조회합니다.
 ### Embedding Service
 
 - AI 챗봇의 유사 재배 사례 검색 (선택적 호출)
+- 인사이트 배치 임베딩 요청 (Insight Batch Scheduler가 임계치 도달 시, 버섯 종류/환경
+  평균/생육 점수/수확량을 묶어 전달 → Embedding Service가 임베딩 후 `cultivation_insight`
+  인덱스에 저장)
+- 인사이트 유사 사례 검색 (사용자 요청 시점, 버섯 종류 + 온도 오차 범위로 검색)
 
 ---
 
 ### Sensor Service
 
 - 센서 데이터 조회 (AI 챗봇에서 참고용으로 사용)
+- 일일 피드백 생성 시 재배의 `environment_setting`(최근 변경 이력) 조회
+  (`GET /api/v1/sensors/cultivations/{cultivationId}/environment-history`, Daily Scheduler 실행 시)
+- 인사이트 배치 임베딩 적재 시 환경 평균 일괄 조회
+  (`POST /api/v1/sensors/environment-averages`, Insight Batch Scheduler 실행 시)
+- 인사이트 조회 시 현재 재배의 환경 평균 조회
+  (`GET /api/v1/sensors/cultivations/{cultivationId}/environment-average`, 사용자 요청 시점)
 
 주간 데이터는 더 이상 AI Service가 요청 시점에 조회하지 않습니다. Sensor Service의 Weekly
 Scheduler가 먼저 집계해 전달합니다(아래 "호출받는 서비스" 참고).
+
+> ℹ️ **변경 이력**: 환경 변경 이력/평균 조회는 원래 Cultivation Service를 호출했지만,
+> `environment_setting`이 Sensor Service로 이관되면서 모두 Sensor Service 호출로 바뀌었습니다.
 
 ---
 
 ### Cultivation Service
 
 - 버섯 가이드 생성 시 `GET /api/v1/mushroom-references/{mushroomType}` 호출 (RAG 컨텍스트 조회, 캐시 미스 시에만)
-- 일일 피드백 생성 시 재배의 `environment_setting`(최근 변경 이력) 조회 (Daily Scheduler 실행 시)
+- 인사이트 배치 임베딩 적재 시 (Insight Batch Scheduler 실행 시)
+  - `GET /api/v1/harvests/unembedded-count` (미임베딩 건수 조회)
+  - `GET /api/v1/harvests/unembedded` (미임베딩 목록 조회, 임계치 도달 시에만)
+  - `PATCH /api/v1/harvests/embedded` (Embedding Service 저장 성공 후 완료 처리)
+- 인사이트 조회 시 재배의 버섯 종류 조회 (`GET /cultivations/{cultivationId}`, 사용자 요청 시점)
 
 ---
 
@@ -411,7 +534,7 @@ RUNNING 상태 재배 순회
 
 ↓
 
-Cultivation Service OpenFeign 호출 (environment_setting 최근 변경 이력 조회)
+Sensor Service OpenFeign 호출 (environment_setting 최근 변경 이력 조회)
 
 ↓
 
@@ -427,9 +550,56 @@ daily_feedback 저장 (PostgreSQL)
 RabbitMQ Publish (DailyFeedbackCompletedEvent)
 ```
 
-Sensor Service의 Weekly Scheduler와 달리, AI Service가 직접 스케줄러를 갖습니다. 필요한
-데이터(생육 분석 이력, 환경 변경 이력)가 모두 AI Service 자신 또는 Cultivation Service에
-있어 Sensor Service를 거칠 필요가 없기 때문입니다.
+AI Service가 직접 스케줄러를 갖습니다. 필요한 데이터(생육 분석 이력은 AI Service 자신,
+환경 변경 이력은 Sensor Service)를 오케스트레이션합니다.
+
+> ℹ️ **변경 이력**: 환경 변경 이력 조회 대상이 `environment_setting` 이관에 따라
+> Cultivation Service에서 Sensor Service로 바뀌었습니다.
+
+---
+
+## Insight Batch Scheduler
+
+매일 00시에 실행되며, 완료된 재배 중 아직 임베딩되지 않은 건이 전체 합산 20건 이상 쌓였는지
+확인하고, 쌓였다면 그 배치를 한 번에 임베딩합니다.
+
+```
+Cultivation Service OpenFeign 호출 (GET /api/v1/harvests/unembedded-count)
+
+↓
+
+20건 미만 → 이번 실행 종료 (다음 날 다시 확인)
+
+20건 이상 ↓
+
+Cultivation Service OpenFeign 호출 (GET /api/v1/harvests/unembedded, 미임베딩 목록)
+
+↓
+
+Sensor Service OpenFeign 호출 (POST /api/v1/sensors/environment-averages, cultivationId 목록으로 환경 평균 일괄 조회)
+
+↓
+
+각 건에 대해 AI Service 자신의 growth_record에서 생육 점수 조회 후 병합
+
+↓
+
+Embedding Service OpenFeign 호출 (배치 임베딩 요청)
+
+↓
+
+성공 → Cultivation Service OpenFeign 호출 (PATCH /api/v1/harvests/embedded, 완료 처리)
+실패 → 완료 처리하지 않음 (다음 배치 때 동일 건이 다시 미임베딩 목록에 포함되어 재시도됨)
+```
+
+Daily Scheduler와 마찬가지로 AI Service가 직접 스케줄러를 소유하며, 이번에는 Cultivation
+Service/Sensor Service/Embedding Service 세 서비스를 오케스트레이션합니다. "임베딩 여부"의
+최종 소유권은 Cultivation Service(`harvest.is_embedded`)에 있고, AI Service는 워터마크를
+별도로 관리하지 않습니다.
+
+> ℹ️ **변경 이력**: 환경 평균 조회가 `GET /api/v1/harvests/unembedded` 응답에 포함되던
+> 방식에서, Sensor Service의 별도 배치 조회 API를 호출하는 방식으로 바뀌었습니다.
+> `environment_setting`이 Sensor Service로 이관되며 생긴 변화입니다.
 
 ---
 
@@ -561,7 +731,7 @@ growth_record 조회 (그날 분석 결과 존재 여부 확인)
 
 ↓
 
-Cultivation Service OpenFeign 호출 (environment_setting 최근 변경 이력)
+Sensor Service OpenFeign 호출 (environment_setting 최근 변경 이력)
 
 ↓
 
@@ -596,6 +766,84 @@ Client
 
 ---
 
+## 인사이트 배치 임베딩 적재
+
+Insight Batch Scheduler (AI Service, 매일 00시)
+
+↓
+
+Cultivation Service OpenFeign 호출 (미임베딩 건수 조회)
+
+↓
+
+20건 미만 → 종료
+
+↓ 20건 이상
+
+Cultivation Service OpenFeign 호출 (미임베딩 목록 조회)
+
+↓
+
+Sensor Service OpenFeign 호출 (환경 평균 일괄 조회, POST /api/v1/sensors/environment-averages)
+
+↓
+
+growth_record 조회 (건별 생육 점수 병합)
+
+↓
+
+Embedding Service OpenFeign 호출 (배치 임베딩 요청)
+
+↓
+
+Embedding Service → Elasticsearch (cultivation_insight 인덱스 저장)
+
+↓
+
+Cultivation Service OpenFeign 호출 (PATCH /api/v1/harvests/embedded, 완료 처리)
+
+자세한 내용은 [insight.md](../04_sequence/insight.md) 참고.
+
+---
+
+## 인사이트 조회
+
+Client
+
+↓
+
+AI Service
+
+↓
+
+Redis 캐시 조회 (ai:{cultivationId}:insight)
+
+↓
+
+Cache Hit → 즉시 반환
+
+↓
+
+Cache Miss → Cultivation Service OpenFeign 호출 (버섯 종류 조회) + Sensor Service OpenFeign
+호출 (현재 재배 환경 평균 조회)
+
+↓
+
+Embedding Service OpenFeign 호출 (버섯 종류 + 온도 오차 범위로 유사 사례 검색)
+
+↓
+
+매칭 사례 있음 → LLM 요약 → Redis 캐시 저장 → 반환
+매칭 사례 없음 → LLM 미호출, 고정 안내 문구 반환 (캐시하지 않음)
+
+↓
+
+Client
+
+자세한 내용은 [insight.md](../04_sequence/insight.md) 참고.
+
+---
+
 # 예외 상황
 
 - Embedding 검색 실패
@@ -608,9 +856,14 @@ Client
 - 등록된 사진 없음
 - Vision 모델 분석 실패
 - growth_record 저장 실패 (PostgreSQL) — 저장에 실패해도 생육 분석 응답 자체는 사용자에게 반환합니다
-- 일일 피드백 생성 시 Cultivation Service 호출 실패 (environment_setting 조회 실패)
+- 일일 피드백 생성 시 Sensor Service 호출 실패 (environment_setting 이력 조회 실패)
 - daily_feedback 저장 실패 (PostgreSQL)
 - Weekly Scheduler로부터 데이터 전달 실패 (해당 주는 리포트가 갱신되지 않고 이전 리포트가 Redis에 남아있음)
+- 인사이트 배치 임베딩 적재 시 Cultivation Service 호출 실패 (미임베딩 건수/목록 조회 실패) — 이번 배치는 건너뛰고 다음 날 다시 시도
+- 인사이트 배치 임베딩 적재 시 Sensor Service 호출 실패 (환경 평균 일괄 조회 실패) — 이번 배치는 건너뛰고 다음 날 다시 시도
+- 인사이트 배치 임베딩 적재 시 Embedding Service 호출 실패 — 해당 건들은 완료 처리(is_embedded)되지 않아 다음 배치 때 재시도됨
+- 인사이트 조회 시 Cultivation Service 호출 실패 (버섯 종류 조회 실패) 또는 Sensor Service 호출 실패 (현재 재배 환경 평균 조회 실패)
+- 인사이트 조회 시 Embedding Service 호출 실패 또는 유사 사례 없음 — LLM 미호출, 고정 안내 문구 반환
 - API 호출 시간 초과
 
 ---

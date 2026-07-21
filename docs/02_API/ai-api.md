@@ -47,6 +47,12 @@ Bearer JWT
 > `GET /feedback/daily`로 조회할 수 있습니다. (자세한 내용은
 > [ai-report.md](../04_sequence/ai-report.md), [daily-feedback.md](../04_sequence/daily-feedback.md) 참고)
 
+> ℹ️ **변경 이력**: "인사이트" 기능이 추가되어 `GET /insight`로 조회할 수 있습니다. 일일
+> 피드백/AI 리포트와 달리 스케줄러가 미리 만들어두지 않으며, 사용자가 호출한 시점에 Embedding
+> Service 검색 + LLM 요약이 즉시 수행됩니다(on-demand). 배치 임베딩 적재는 별도의 Insight
+> Batch Scheduler(00시)가 담당하며 사용자가 호출하는 API가 아닙니다. (자세한 내용은
+> [insight.md](../04_sequence/insight.md) 참고)
+
 ---
 
 # 생육 분석 (Vision)
@@ -360,6 +366,69 @@ AI Service
 
 ---
 
+# 인사이트 조회
+
+## GET /insight
+
+같은 버섯 종류이면서 유사한(오차 범위 내) 온도로 재배했던 타인의 완료된 재배 사례를 바탕으로
+현재 재배 상태에 대한 피드백을 생성합니다. 일일 피드백(자기 자신의 이력 비교)과 달리, 이
+API는 사용자가 호출한 시점에 즉시 검색/요약이 수행됩니다(사용자 요청 시점, on-demand).
+
+### Query Parameter
+
+| 이름 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| cultivationId | long | O | 조회할 재배 ID |
+
+---
+
+### Process
+
+AI Service
+
+↓
+
+Redis 캐시 조회 (ai:{cultivationId}:insight)
+
+↓
+
+Cache Miss 시 Cultivation Service OpenFeign 호출 (`GET /cultivations/{cultivationId}`, 버섯
+종류 조회) + Sensor Service OpenFeign 호출 (`GET
+/api/v1/sensors/cultivations/{cultivationId}/environment-average`, 현재 재배의 환경 평균 조회)
+
+↓
+
+Embedding Service OpenFeign 호출 (버섯 종류 + 온도 오차 범위로 `cultivation_insight` 인덱스 검색)
+
+↓
+
+매칭 사례 있음 → LLM 요약 → Redis 캐시 저장 (TTL 24시간)
+매칭 사례 없음 → LLM 미호출, 고정 안내 문구 (캐시하지 않음)
+
+---
+
+### Response
+
+```json
+{
+    "cultivationId": 27,
+    "matchedCaseCount": 8,
+    "insight": "비슷한 온도(21.5~22.5℃)로 느타리버섯을 재배한 다른 사례 8건과 비교했을 때, 현재 재배의 생육 점수는 평균보다 다소 높은 편입니다. 이 온도대에서 습도를 90% 전후로 유지한 사례들의 수확량이 특히 높았습니다."
+}
+```
+
+유사 사례가 없을 때의 응답:
+
+```json
+{
+    "cultivationId": 27,
+    "matchedCaseCount": 0,
+    "insight": "아직 비교할 수 있는 유사 사례가 충분하지 않습니다."
+}
+```
+
+---
+
 # Error Code
 
 | Code | Description |
@@ -377,7 +446,10 @@ AI Service
 | AI011 | 아직 생성된 주간 리포트 없음 |
 | AI012 | growth_record 저장 실패 (PostgreSQL) |
 | AI013 | daily_feedback 저장 실패 (PostgreSQL) |
-| AI014 | 일일 피드백 생성 시 Cultivation Service 호출 실패 (environment_setting 조회 실패) |
+| AI014 | 일일 피드백 생성 시 Sensor Service 호출 실패 (environment_setting 이력 조회 실패) |
+| AI015 | 인사이트 조회 시 Cultivation Service 호출 실패 (버섯 종류 조회 실패) 또는 Sensor Service 호출 실패 (환경 평균 조회 실패) |
+| AI016 | 인사이트 조회 시 Embedding Service 검색 실패 |
+| AI017 | 인사이트 배치 임베딩 적재 실패 (Cultivation Service 미임베딩 조회/완료 처리, Sensor Service 환경 평균 일괄 조회, Embedding Service 저장 요청 실패 포함) |
 
 ---
 
@@ -389,15 +461,25 @@ AI Service
 Embedding Service (챗봇 유사 재배 사례 검색, 선택적 호출)
 Sensor Service (센서 데이터 조회, 챗봇에서 참고용으로 사용. 주간 통계는 더 이상 요청 시점에 조회하지 않음)
 Cultivation Service (버섯 가이드 RAG 컨텍스트 조회, GET /api/v1/mushroom-references/{mushroomType}, 캐시 미스 시에만)
-Cultivation Service (일일 피드백 생성 시 environment_setting 최근 변경 이력 조회, Daily Scheduler 실행 시)
+Sensor Service (일일 피드백 생성 시 environment_setting 최근 변경 이력 조회, GET /api/v1/sensors/cultivations/{cultivationId}/environment-history, Daily Scheduler 실행 시)
+Cultivation Service (인사이트 배치 임베딩 적재 시, GET /api/v1/harvests/unembedded-count, GET /api/v1/harvests/unembedded, PATCH /api/v1/harvests/embedded — Insight Batch Scheduler 실행 시)
+Sensor Service (인사이트 배치 임베딩 적재 시 환경 평균 일괄 조회, POST /api/v1/sensors/environment-averages — Insight Batch Scheduler 실행 시)
+Cultivation Service (인사이트 조회 시 버섯 종류 조회, GET /cultivations/{cultivationId} — 사용자 요청 시점, 캐시 미스 시에만)
+Sensor Service (인사이트 조회 시 환경 평균 조회, GET /api/v1/sensors/cultivations/{cultivationId}/environment-average — 사용자 요청 시점, 캐시 미스 시에만)
+Embedding Service (인사이트 배치 임베딩 요청 — Insight Batch Scheduler 실행 시)
+Embedding Service (인사이트 유사 사례 검색 — 사용자 요청 시점, 캐시 미스 시에만)
 ```
+
+> ℹ️ **변경 이력**: `environment_setting` 관련 호출(일일 피드백 이력 조회, 인사이트 환경
+> 평균 조회)이 Cultivation Service에서 Sensor Service로 바뀌었습니다. 인사이트 배치
+> 임베딩 적재 시 환경 평균 일괄 조회가 Sensor Service 호출로 새로 추가되었습니다.
 
 호출받는 서비스
 
 ```
 Cultivation Service (생육 사진 Vision 분석 요청)
 Sensor Service (Weekly Scheduler가 집계한 주간 통계 전달, push)
-API Gateway (AI 챗봇 요청, 버섯 가이드 요청, AI 리포트 조회, 일일 피드백 조회)
+API Gateway (AI 챗봇 요청, 버섯 가이드 요청, AI 리포트 조회, 일일 피드백 조회, 인사이트 조회)
 ```
 
 ---
@@ -410,6 +492,7 @@ API Gateway (AI 챗봇 요청, 버섯 가이드 요청, AI 리포트 조회, 일
 - AI 챗봇 응답 (ai:{hash}, TTL 24시간)
 - AI 리포트 (report:{cultivationId}:weekly, TTL 24시간) — Weekly Scheduler가 push로 미리 채워둠
 - 버섯 가이드 (ai:mushroom:{mushroomType}:guide, TTL 7일) — cultivationId가 아닌 mushroomType 기준으로 캐싱됩니다.
+- 인사이트 (ai:{cultivationId}:insight, TTL 24시간) — 사용자 요청 시점에 생성되어 캐시됩니다(유일하게 push가 아닌 pull로 채워지는 캐시). 유사 사례가 없어 고정 문구로 응답한 경우는 캐시하지 않습니다.
 
 일일 피드백은 Redis에 캐시하지 않고 `daily_feedback` 테이블에 바로 영구 저장합니다(하루에
 한 번만 생성되므로 캐시가 불필요).

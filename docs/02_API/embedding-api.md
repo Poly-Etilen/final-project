@@ -24,6 +24,13 @@ Bearer JWT (관리자 권한 필요 - 생성/재생성/삭제)
 > `MushroomReferenceUpdatedEvent`를 구독해 자동으로 이루어지며, 아래 `POST /`는 수동/관리자
 > 트리거용으로 남겨둡니다.
 
+> ℹ️ **변경 이력**: "인사이트" 기능 추가를 위해 `POST /insights`(배치 임베딩)와
+> `POST /insights/search`(유사 사례 검색) 두 내부용 엔드포인트가 새로 생겼습니다. 기존
+> `POST /`/`POST /search`가 다루는 `mushroom_environment`(버섯 종류별 고정 참조 데이터)와는
+> 별개로, `cultivation_insight`(완료된 재배 사례) 인덱스를 다룹니다. 두 엔드포인트 모두
+> AI Service만 호출하는 내부용이며, 관리자/Client가 직접 호출하지 않습니다. (자세한 내용은
+> [insight.md](../04_sequence/insight.md) 참고)
+
 ---
 
 # 임베딩 생성
@@ -159,6 +166,123 @@ Cultivation DB의 `mushroom_reference` 참조 데이터가 변경된 경우 전�
 
 ---
 
+# 인사이트 사례 배치 임베딩 (내부용)
+
+## POST /insights
+
+AI Service의 Insight Batch Scheduler(00시)가 미임베딩 수확 건이 임계치(20건) 이상일 때
+호출하는 내부용 엔드포인트입니다. 완료된 재배 여러 건을 한 번에 임베딩합니다.
+
+### Request
+
+```json
+{
+    "cases": [
+        {
+            "cultivationId": 12,
+            "mushroomType": "OYSTER",
+            "avgTemperature": 21.8,
+            "avgHumidity": 89.2,
+            "avgCo2": 780.5,
+            "avgLight": 360.0,
+            "growthScore": 88,
+            "harvestWeight": 3200
+        }
+    ]
+}
+```
+
+---
+
+### Process
+
+Embedding Service
+
+↓
+
+각 case를 자연어 요약 문장으로 변환
+
+↓
+
+Embedding Model 호출
+
+↓
+
+Vector 생성
+
+↓
+
+Elasticsearch 저장 (cultivation_insight, cultivationId 기준 신규 문서)
+
+---
+
+### Response
+
+```json
+{
+    "message": "23 cases embedded",
+    "count": 23
+}
+```
+
+---
+
+# 인사이트 유사 사례 검색 (내부용)
+
+## POST /insights/search
+
+AI Service가 사용자의 인사이트 조회 요청을 받았을 때(사용자 요청 시점, Redis 캐시 미스 시에만)
+호출하는 내부용 엔드포인트입니다.
+
+### Request
+
+```json
+{
+    "mushroomType": "OYSTER",
+    "avgTemperature": 22.1,
+    "tolerance": 1.5,
+    "topK": 10
+}
+```
+
+`tolerance`는 온도 허용 오차 범위(±℃)이며, `avgTemperature ± tolerance` 범위 내의 사례만
+매칭됩니다.
+
+---
+
+### Process
+
+Embedding Service
+
+↓
+
+Elasticsearch 검색 (mushroomType term 필터 + avgTemperature range 필터, topK개)
+
+---
+
+### Response
+
+```json
+{
+    "matchedCaseCount": 8,
+    "cases": [
+        {
+            "avgTemperature": 21.8,
+            "avgHumidity": 89.2,
+            "avgCo2": 780.5,
+            "avgLight": 360.0,
+            "growthScore": 88,
+            "harvestWeight": 3200
+        }
+    ]
+}
+```
+
+벡터 유사도 점수(score)는 반환하지 않습니다 — 이 검색은 코사인 유사도 기반이 아니라 term/range
+필터 기반이기 때문입니다(위 "벡터 검색"과의 차이점).
+
+---
+
 # Error Code
 
 | Code | Description |
@@ -168,6 +292,8 @@ Cultivation DB의 `mushroom_reference` 참조 데이터가 변경된 경우 전�
 | E003 | 검색 결과 없음 |
 | E004 | Index 생성 실패 |
 | E005 | 존재하지 않는 임베딩 |
+| E006 | 인사이트 배치 임베딩 저장 실패 (cultivation_insight) |
+| E007 | 인사이트 검색 시 매칭되는 사례 없음 |
 
 ---
 
@@ -177,6 +303,8 @@ Cultivation DB의 `mushroom_reference` 참조 데이터가 변경된 경우 전�
 
 ```
 AI Service (챗봇 유사 재배 사례 검색, 선택적 호출)
+AI Service (인사이트 배치 임베딩 요청, POST /insights — Insight Batch Scheduler 실행 시)
+AI Service (인사이트 유사 사례 검색, POST /insights/search — 사용자 요청 시점)
 ```
 
 호출하는 서비스

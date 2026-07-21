@@ -19,12 +19,14 @@ Spring Boot 4.0.7이 관리하는 BOM(Bill of Materials) 버전을 그대로 따
 ### PostgreSQL
 
 - 사용자 정보
-- 재배 정보 (환경 설정 이력 포함)
-- 센서 장치 정보
+- 재배 정보
+- 센서 장치 정보 (목표 환경/위험 한계값 이력 포함)
 - 알림 이력
 - 챗봇 대화 이력
 - 생육 분석 이력
 - 일일 피드백 이력
+
+> ℹ️ **변경 이력**: 목표 환경 설정 이력(`environment_setting`)은 원래 재배 정보와 같은 DB에 있었지만, 팀 회의 결과 Sensor Service DB로 이관되어 이제 센서 장치 정보와 함께 저장됩니다. (자세한 내용은 [architecture.md](./architecture.md), [README.md](../README.md)의 결정 사항 #24 참고)
 
 ### Redis
 

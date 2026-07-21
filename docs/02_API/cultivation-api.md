@@ -23,12 +23,26 @@ Bearer JWT
 ## POST /
 
 새로운 재배를 생성합니다. 이 재배에 연결할 센서 "장치"도 `devices`에 함께 담아 한 번에 등록할 수
-있습니다. (물론 나중에 아래 "센서 등록" API로 추가/삭제하는 것도 계속 가능합니다.)
+있습니다. (물론 나중에 Sensor Service의 "센서 등록" API로 추가/삭제하는 것도 계속 가능합니다.
+[sensor-api.md](./sensor-api.md) 참고)
 
 > ℹ️ **변경 이력**: 원래는 재배 생성(이름+버섯종류)과 센서 등록이 완전히 분리된 API였지만,
 > 실제 사용자 흐름상 재배 생성 화면에서 등록할 디바이스도 함께 선택하는 것이 자연스러워
-> `devices`를 재배 생성 요청에 포함할 수 있도록 확장했습니다. 기존 `POST
-> /{cultivationId}/sensors`(센서 개별 등록)는 재배 생성 이후 추가로 센서를 붙일 때 그대로 사용합니다.
+> `devices`를 재배 생성 요청에 포함할 수 있도록 확장했습니다. 당시에는 `sensor` 테이블이 이
+> Cultivation DB에 있어 하나의 로컬 트랜잭션으로 처리했습니다.
+
+> ℹ️ **변경 이력**: 팀 회의 결과 `sensor`/`environment_setting` 테이블과 관련 API가 Sensor
+> Service로 완전히 이관되었습니다. `devices`로 센서를 함께 등록하는 사용자 흐름 자체는
+> 그대로 유지하기로 했지만(사용자 입장에서 재배 생성 화면 하나로 끝나야 함), 더 이상 하나의
+> 로컬 트랜잭션이 아닙니다. Cultivation Service는 cultivation 행을 생성한 뒤 Sensor Service의
+> 배치 등록 엔드포인트(`POST /api/v1/sensors/cultivations/{cultivationId}/batch`, [sensor-api.md](./sensor-api.md)
+> 참고)를 OpenFeign으로 동기 호출하며, 이 호출이 실패하면 방금 생성한 cultivation을 보상
+> 삭제(compensating delete)합니다. 진짜 분산 트랜잭션이 아니라 클라이언트 입장에서의 "전체
+> 성공 또는 전체 실패"처럼 보이게 하는 근사치이며, 보상 삭제 자체가 실패하는 극단적인 경우는
+> 별도 모니터링/재시도 대상으로 남겨둡니다. 개별 센서 등록(재배 생성 이후 추가)은 이제 Sensor
+> Service의 `POST /api/v1/sensors/cultivations/{cultivationId}`를 직접 호출합니다. (자세한
+> 내용은 [sensor-db.md](../03_Database/sensor-db.md), [README.md](../README.md)의 결정 사항
+> #24 참고)
 
 ### Request
 
@@ -63,15 +77,20 @@ Cultivation Service
 
 ↓
 
-mushroom_reference 조회 (mushroom_type 기준)
+Cultivation 생성
 
 ↓
 
-Cultivation 생성 + devices의 각 항목으로 sensor 레코드 생성 (하나의 트랜잭션)
+devices가 1개 이상이면 Sensor Service에 OpenFeign 호출
+(`POST /api/v1/sensors/cultivations/{cultivationId}/batch`)
 
 ↓
 
-디바이스가 1개 이상 등록되었다면 RabbitMQ로 `SensorRegisteredEvent`를 디바이스별로 발행
+실패 시 방금 생성한 Cultivation을 보상 삭제하고 에러 응답 (C005)
+
+↓
+
+성공 시 mushroom_reference 조회 (mushroom_type 기준)
 
 ↓
 
@@ -82,8 +101,8 @@ Cultivation 생성 + devices의 각 항목으로 sensor 레코드 생성 (하나
 Client
 
 AI Service를 호출하지 않고, Cultivation Service가 자체 보유한 참조 테이블을 조회합니다.
-`devices`에 중복된 device_eui가 있거나 이미 등록된 device_eui가 섞여 있으면(C007) 재배 생성
-자체가 롤백됩니다(전체 성공 또는 전체 실패).
+`devices`의 device_eui 중복/기존 등록 여부 검증은 Sensor Service가 수행하며, 검증에 실패하면
+배치 등록 호출 자체가 실패로 응답되어 위 보상 삭제 흐름을 탑니다.
 
 ---
 
@@ -106,60 +125,16 @@ AI Service를 호출하지 않고, Cultivation Service가 자체 보유한 참�
 ```
 
 추천값은 mushroom_reference에 저장된 범위를 그대로 반환합니다. 사용자가 이 범위를 참고해서
-아래 "환경 설정 저장"에서 실제 자동 제어 기준값을 직접 입력합니다. `description`은
-mushroom_reference의 짧은 참고 문구이며, 버섯 효능/재배 시 주의사항을 다루는 AI 생성 콘텐츠는
-[ai-api.md](./ai-api.md)의 "버섯 가이드"를 참고하세요. `devices`를 생략했다면 `registeredSensors`는
-빈 배열입니다.
+Sensor Service의 "환경 설정 저장" API로 실제 자동 제어 기준값을 직접 입력합니다
+([sensor-api.md](./sensor-api.md) 참고). `description`은 mushroom_reference의 짧은 참고
+문구이며, 버섯 효능/재배 시 주의사항을 다루는 AI 생성 콘텐츠는 [ai-api.md](./ai-api.md)의
+"버섯 가이드"를 참고하세요. `devices`를 생략했다면 `registeredSensors`는 빈 배열입니다.
+`registeredSensors`는 Sensor Service 배치 등록 호출의 응답을 그대로 전달(pass-through)한
+것입니다.
 
----
-
-# 환경 설정 저장
-
-## PATCH /{cultivationId}/environment
-
-사용자가 추천값(mushroom_reference)을 참고하여 실제 자동 제어 기준값(위험 한계값)을 저장합니다.
-
-> ℹ️ **변경 이력**: `environment_setting`이 항목(TEMPERATURE/HUMIDITY/CO2/LIGHT)별 행 구조로
-> 재설계되면서, 이 API도 4개 필드를 모두 함께 보내지 않고 **일부 항목만 선택적으로 수정**할
-> 수 있도록 바뀌었습니다. 예를 들어 온도만 바꾸고 싶으면 `temperature`만 보내면 됩니다. 최소
-> 1개 이상의 필드는 있어야 합니다. (자세한 내용은
-> [cultivation-db.md](../03_Database/cultivation-db.md)의 `environment_setting` 참고)
-
-### Request
-
-```json
-{
-    "temperature":22
-}
-```
-
-4개 필드(`temperature`/`humidity`/`co2`/`light`) 모두 선택 항목이며, 보낸 필드만 수정됩니다.
-물론 기존처럼 여러 필드를 한 번에 보낼 수도 있습니다.
-
-```json
-{
-    "temperature":22,
-    "humidity":91,
-    "co2":850,
-    "light":420
-}
-```
-
----
-
-### Response
-
-```json
-{
-    "message":"Environment Saved"
-}
-```
-
-저장 시 보낸 필드마다 단일 목표값을 허용 오차만큼 확장한 범위(min~max)로 변환해 새 행을
-INSERT합니다(수정하지 않은 항목은 기존 최신 행이 그대로 유지됩니다). 이후 재배의 4개 항목
-전체(방금 수정한 것 + 기존 최신 값)를 모아 RabbitMQ로 `EnvironmentRangeUpdatedEvent`를
-발행합니다(Rule Engine Service의 Redis 캐시는 항상 4개 항목 전체를 갖고 있어야 하므로, 이
-이벤트 자체의 형태는 이전과 동일하게 4개 항목을 모두 담습니다).
+> ℹ️ **변경 이력**: "환경 설정 저장"(`PATCH /{cultivationId}/environment`) API는 Sensor
+> Service로 완전히 이관되어 이 문서에서 제거되었습니다. [sensor-api.md](./sensor-api.md)를
+> 참고하세요.
 
 ---
 
@@ -191,26 +166,19 @@ INSERT합니다(수정하지 않은 항목은 기존 최신 행이 그대로 유
 {
     "cultivationId":1,
     "name":"느타리 1호기",
-
-    "environment":{
-
-        "temperature":22,
-        "humidity":91,
-        "co2":850,
-        "light":420
-
-    },
-
+    "mushroomType":"OYSTER",
     "status":"RUNNING",
-
     "createdAt":"2026-08-01"
 }
 ```
 
-`environment`의 각 값은 environment_setting에 저장된 범위의 중간값 `(min+max)/2`을 조회
-시점에 계산한 것입니다. 허용 오차가 대칭으로 적용되므로 저장 시 사용자가 입력했던 단일값과
-정확히 일치합니다. (자세한 내용은 [cultivation-db.md](../03_Database/cultivation-db.md)의
-"범위 → 단일값 역변환" 참고)
+> ℹ️ **변경 이력**: `environment` 필드(목표 환경값)가 이 응답에서 제거되었습니다.
+> `environment_setting`이 Sensor Service로 이관되면서 Cultivation Service가 더 이상 직접
+> 조회할 수 없기 때문입니다. Cultivation Service가 매 조회마다 Sensor Service를 동기
+> 호출해 조합(aggregate)하는 대신, 클라이언트가 필요 시 Sensor Service의 환경 조회 API를
+> 별도로 호출하도록 책임을 분리했습니다(다른 서비스도 이미 이 패턴을 따릅니다 — 예: AI
+> Service의 인사이트 배치는 Cultivation Service와 Sensor Service를 각각 호출해 필요한
+> 데이터를 조합합니다). (자세한 내용은 [sensor-api.md](./sensor-api.md) 참고)
 
 ---
 
@@ -277,90 +245,35 @@ INSERT합니다(수정하지 않은 항목은 기존 최신 행이 그대로 유
 
 ---
 
-# 센서 등록
-
-## POST /{cultivationId}/sensors
-
-재배 생성 이후 센서를 추가로 등록할 때 사용합니다. (재배 생성과 동시에 등록하려면 위 "재배 생성"의
-`devices`를 사용하세요.)
-
-### Request
-
-```json
-{
-    "deviceEui": "24e124128c067999",
-    "place": "1동 A구역",
-    "location": "선반 2단",
-    "deviceModel": "DHT22",
-    "sensorType": "TEMPERATURE"
-}
-```
-
-`deviceEui`는 장치 고유 식별자이며 그대로 PK로 사용됩니다(서버가 별도로 채번하지 않음).
-LoRaWAN 표준 64비트 DevEUI를 16자리 hex 문자열로 표현한 값이라 문자열(`VARCHAR`)입니다.
+> ℹ️ **변경 이력**: 센서 등록/목록조회/상세조회/삭제(`POST`/`GET`/`GET`/`DELETE
+> /{cultivationId}/sensors...`) API는 `sensor` 테이블과 함께 Sensor Service로 완전히
+> 이관되어 이 문서에서 제거되었습니다. [sensor-api.md](./sensor-api.md)를 참고하세요.
 
 ---
+
+# 재배 소유권 확인 (내부용)
+
+## GET /{cultivationId}/owner
+
+특정 cultivation의 소유자(userId)와 상태를 조회합니다. 사용자가 아닌 **Sensor Service가
+센서/환경 관련 쓰기 요청(등록·수정·삭제)을 처리하기 전 요청자가 해당 cultivation의 소유자가
+맞는지 확인하기 위해서만 호출**하는 내부용 엔드포인트입니다.
+
+> ℹ️ **변경 이력**: `sensor`/`environment_setting`이 Sensor Service로 이관되면서 Sensor
+> Service는 더 이상 `cultivation.user_id`에 직접 접근할 수 없게 되었습니다. 이 엔드포인트로
+> 소유권 확인 책임을 대신합니다. 단, Cultivation Service가 재배 생성 시 호출하는 배치 등록
+> (`POST /api/v1/sensors/cultivations/{cultivationId}/batch`)은 호출자가 Cultivation
+> Service 자신이므로 이 확인을 거치지 않습니다. (자세한 내용은
+> [sensor-db.md](../03_Database/sensor-db.md) 참고)
 
 ### Response
 
 ```json
 {
-    "deviceEui": "24e124128c067999",
-    "message": "센서가 등록되었습니다."
+    "userId": 7,
+    "status": "RUNNING"
 }
 ```
-
-등록과 동시에 RabbitMQ로 `SensorRegisteredEvent`를 발행합니다. (DatasourceGenerator의
-sensor_cache 갱신용)
-
----
-
-# 센서 목록 조회
-
-## GET /{cultivationId}/sensors
-
-### Response
-
-```json
-[
-    { "deviceEui": "24e124128c067999", "place": "1동 A구역", "location": "선반 2단", "deviceModel": "DHT22", "sensorType": "TEMPERATURE", "status": "ONLINE" }
-]
-```
-
----
-
-# 센서 상세 조회
-
-## GET /{cultivationId}/sensors/{deviceEui}
-
-### Response
-
-```json
-{
-    "deviceEui": "24e124128c067999",
-    "place": "1동 A구역",
-    "location": "선반 2단",
-    "deviceModel": "DHT22",
-    "sensorType": "TEMPERATURE",
-    "status": "ONLINE"
-}
-```
-
----
-
-# 센서 삭제
-
-## DELETE /{cultivationId}/sensors/{deviceEui}
-
-### Response
-
-```json
-{
-    "message": "센서가 삭제되었습니다."
-}
-```
-
-삭제와 동시에 RabbitMQ로 `SensorDeletedEvent`를 발행합니다.
 
 ---
 
@@ -429,29 +342,107 @@ sensor_cache 갱신용)
 
 ---
 
-# 센서 전체 목록 조회 (내부용)
+> ℹ️ **변경 이력**: 센서 전체 목록 조회(`GET /api/v1/sensors`, DatasourceGenerator가 재시작 시
+> 캐시 재구성을 위해 호출하던 내부용 엔드포인트)는 `sensor` 테이블과 함께 Sensor Service로
+> 이관되었습니다. DatasourceGenerator는 이제 재시작 시 Cultivation Service가 아닌 Sensor
+> Service를 호출합니다. (자세한 내용은 [sensor-api.md](./sensor-api.md),
+> [datasource-generator-api.md](./datasource-generator-api.md) 참고)
 
-## GET /api/v1/sensors
+---
 
-특정 재배로 한정하지 않고, 전체 재배의 센서 목록을 조회합니다. 사용자가 아닌 **DatasourceGenerator가
-서비스 재시작 시 캐시(In-Memory)를 재구성하기 위해서만 호출**하는 내부용 엔드포인트입니다.
-(다른 센서 API처럼 `/cultivations/{cultivationId}` 하위 경로가 아닌 것에 유의)
+# 미임베딩 수확 건수 조회 (내부용)
+
+## GET /api/v1/harvests/unembedded-count
+
+"인사이트" 기능을 위해 아직 Elasticsearch에 임베딩되지 않은 수확(harvest) 건수를 조회합니다.
+사용자가 아닌 **AI Service가 00시 배치 스케줄러에서 임계치(20건) 도달 여부를 판단하기 위해서만
+호출**하는 내부용 엔드포인트입니다.
+
+> ℹ️ **변경 이력**: "인사이트" 기능(같은 버섯 종류 + 유사한 온도로 재배했던 타인의 사례를 바탕으로
+> 피드백을 주는 기능) 추가를 위해 신설했습니다. AI Service는 별도의 워터마크(마지막으로 처리한
+> 시각/ID 등)를 관리하지 않고, 이 엔드포인트로 단순 조회만 합니다. "임베딩 여부"의 소유권은
+> Cultivation Service(`harvest.is_embedded`)에 있습니다. (자세한 내용은
+> [insight.md](../04_sequence/insight.md) 참고)
+
+### Response
+
+```json
+{
+    "count": 23
+}
+```
+
+전체 사용자의 수확을 합산한 전역 카운트이며, 특정 사용자로 한정하지 않습니다.
+
+---
+
+# 미임베딩 수확 목록 조회 (내부용)
+
+## GET /api/v1/harvests/unembedded
+
+임베딩되지 않은 수확 건의 상세 목록을 조회합니다. 사용자가 아닌 **AI Service가 위 카운트가
+임계치(20건) 이상일 때, 실제 배치 임베딩 대상 데이터를 가져오기 위해서만 호출**하는 내부용
+엔드포인트입니다.
 
 ### Response
 
 ```json
 [
-    { "deviceEui": "24e124128c067999", "cultivationId": 3, "sensorType": "TEMPERATURE" }
+    {
+        "cultivationId": 12,
+        "mushroomType": "OYSTER",
+        "harvestWeight": 3200
+    }
 ]
 ```
 
-place/location/deviceModel/status 등 상세 메타데이터는 포함하지 않습니다. DatasourceGenerator는
-"어떤 device_eui에 대해 데이터를 생성/발행할지" 판단하는 데 필요한 최소 정보만 필요하기 때문입니다.
+> ℹ️ **변경 이력**: 이 응답에 있던 `avgTemperature`/`avgHumidity`/`avgCo2`/`avgLight`(기간
+> 가중 평균)는 `environment_setting`이 Sensor Service로 이관되면서 더 이상 Cultivation
+> Service가 계산할 수 없어 제거했습니다. AI Service의 인사이트 배치 스케줄러는 이제 이
+> 엔드포인트로 미임베딩 수확 목록(cultivationId 등)을 받은 뒤, Sensor Service의
+> `POST /api/v1/sensors/environment-averages`(cultivationId 목록을 보내는 일괄 조회)를
+> 별도로 호출해 환경 평균을 채워 넣습니다. (자세한 내용은 [sensor-api.md](./sensor-api.md),
+> [insight.md](../04_sequence/insight.md) 참고)
 
-> ℹ️ **변경 이력**: DatasourceGenerator가 `sensor_cache`를 PostgreSQL이 아닌 메모리(In-Memory)에만
-> 보관하도록 바뀌면서, 서비스 재시작 시 이벤트만으로는 캐시를 복구할 수 없는 문제가 생겼습니다.
-> 이를 해결하기 위해 재시작 시점에 이 엔드포인트를 OpenFeign으로 호출해 전체 센서 목록을 한 번에
-> 받아와 캐시를 재구성합니다.
+생육 점수(growthScore)는 이 응답에 포함되지 않습니다 — AI DB(`growth_record`)에 있는 데이터라
+AI Service가 자체적으로 채워 넣습니다.
+
+---
+
+# 수확 임베딩 완료 처리 (내부용)
+
+## PATCH /api/v1/harvests/embedded
+
+지정한 수확 건들의 `is_embedded`를 `TRUE`로 갱신합니다. 사용자가 아닌 **AI Service가
+Embedding Service로의 배치 임베딩 호출에 성공한 직후에만 호출**하는 내부용 엔드포인트입니다.
+
+### Request
+
+```json
+{
+    "cultivationIds": [12, 15, 18]
+}
+```
+
+### Response
+
+```json
+{
+    "message": "23 harvests marked as embedded"
+}
+```
+
+이미 `is_embedded = TRUE`인 건이 섞여 있어도 오류 없이 무시합니다(멱등). 임베딩 자체가 실패한
+경우 이 엔드포인트를 호출하지 않으며, 해당 건들은 다음 배치 때 다시 미임베딩 목록에 포함됩니다.
+
+---
+
+> ℹ️ **변경 이력**: 재배 환경 평균 조회(`GET /api/v1/cultivations/{cultivationId}/environment-average`,
+> AI Service가 "인사이트" 조회 시점에 현재 재배 조건을 파악하기 위해 호출하던 내부용
+> 엔드포인트)는 `environment_setting`과 함께 Sensor Service로 이관되었습니다. AI Service는
+> 이제 Sensor Service의 `GET /api/v1/sensors/cultivations/{cultivationId}/environment-average`를
+> 호출합니다. (자세한 내용은 [sensor-api.md](./sensor-api.md), [insight.md](../04_sequence/insight.md)
+> 참고)
 
 ---
 
@@ -462,11 +453,13 @@ place/location/deviceModel/status 등 상세 메타데이터는 포함하지 않
 | C001 | 존재하지 않는 재배 |
 | C002 | 이미 종료된 재배 |
 | C003 | 권한 없음 |
-| C004 | 환경 저장 실패 |
-| C005 | 지원하지 않는 버섯 종류 (mushroom_reference에 없음) |
-| C006 | 존재하지 않는 센서 |
-| C007 | 이미 등록된 device_eui (센서 등록 시 중복) |
-| C008 | 환경 설정 저장 시 필드를 하나도 보내지 않음 (temperature/humidity/co2/light 중 최소 1개 필요) |
+| C004 | 지원하지 않는 버섯 종류 (mushroom_reference에 없음) |
+| C005 | Sensor Service 배치 등록 실패로 재배 생성이 취소됨 (보상 삭제 처리) |
+
+> ℹ️ **변경 이력**: 센서/환경 관련 에러 코드(기존 C004 환경 저장 실패, C006 존재하지 않는 센서,
+> C007 device_eui 중복, C008 환경 필드 미입력, C009 environment_setting 이력 없음)는 해당
+> API가 Sensor Service로 이관되면서 함께 제거되었습니다. Sensor Service의 에러 코드는
+> [sensor-api.md](./sensor-api.md)를 참고하세요. 남은 코드는 C001~C005로 재정리했습니다.
 
 ---
 
@@ -474,14 +467,17 @@ place/location/deviceModel/status 등 상세 메타데이터는 포함하지 않
 
 사용 서비스
 
-- AI Service ("버섯 가이드" 생성 시 `GET /api/v1/mushroom-references/{mushroomType}` 호출. 생육 사진 Vision 분석은 반대로 Cultivation Service가 AI Service를 호출하는 방향이라 여기 해당하지 않음)
-- Sensor Service
-- DatasourceGenerator (서비스 시작 시에만, `GET /api/v1/sensors` 전체 목록 조회)
+- AI Service ("버섯 가이드" 생성 시 `GET /api/v1/mushroom-references/{mushroomType}` 호출. 생육 사진 Vision 분석은 반대로 Cultivation Service가 AI Service를 호출하는 방향이라 여기 해당하지 않음. "인사이트" 기능을 위해 `GET /api/v1/harvests/unembedded-count`, `GET /api/v1/harvests/unembedded`, `PATCH /api/v1/harvests/embedded`도 호출)
+- Sensor Service (센서/환경 쓰기 요청 처리 전 소유권 확인을 위해 `GET /{cultivationId}/owner` 호출)
 - Embedding Service (Elasticsearch 전체 재생성 시에만, `GET /api/v1/mushroom-references` 전체 목록 조회. 평상시에는 MushroomReferenceUpdatedEvent로만 동기화)
 
-센서 등록/삭제 자체는 DatasourceGenerator를 동기 호출하지 않고 이벤트(RabbitMQ)로만 전달합니다.
-DatasourceGenerator가 Cultivation Service를 OpenFeign으로 호출하는 것은 재시작 시 메모리 캐시를
-재구성하는 경우뿐입니다.
+> ℹ️ **변경 이력**: DatasourceGenerator는 더 이상 Cultivation Service를 호출하지 않습니다.
+> 재시작 시 캐시 재구성용 전체 센서 목록 조회(`GET /api/v1/sensors`)가 Sensor Service로
+> 이관되었기 때문입니다. (자세한 내용은 [datasource-generator-api.md](./datasource-generator-api.md) 참고)
+
+Cultivation Service도 재배 생성 시 Sensor Service를 OpenFeign으로 호출합니다(배치 등록,
+`POST /api/v1/sensors/cultivations/{cultivationId}/batch`). 이 호출은 위 "사용 서비스" 목록과
+반대 방향(Cultivation Service → Sensor Service)이며, 실패 시 보상 삭제로 처리합니다.
 
 ---
 
@@ -491,11 +487,20 @@ DatasourceGenerator가 Cultivation Service를 OpenFeign으로 호출하는 것�
 
 - CultivationCreatedEvent
 - CultivationFinishedEvent
-- EnvironmentRangeUpdatedEvent
-- SensorRegisteredEvent (센서 등록 시, 구독: DatasourceGenerator — 재배 생성 시 `devices`로 함께 등록한 센서도 각각 발행됨)
-- SensorDeletedEvent (센서 삭제 시, 구독: DatasourceGenerator)
+- CultivationDeletedEvent (재배 삭제 시, 구독: Sensor Service — 해당 cultivation_id의 sensor/environment_setting을 정리하는 보상 삭제용)
 - MushroomReferenceUpdatedEvent (관리자가 mushroom_reference를 등록/수정할 때, 구독: Embedding Service — Elasticsearch의 mushroom_environment 인덱스 갱신용)
+
+> ℹ️ **변경 이력**: `EnvironmentRangeUpdatedEvent`/`SensorRegisteredEvent`/`SensorDeletedEvent`는
+> 발행 주체가 Sensor Service로 바뀌면서 이 문서에서 제거되었습니다. 대신 DB 레벨
+> `ON DELETE CASCADE`를 대체할 `CultivationDeletedEvent`를 새로 추가했습니다(cultivation_id가
+> 다른 DB를 참조하는 순수 값이라 CASCADE가 걸리지 않습니다). (자세한 내용은
+> [sensor-db.md](../03_Database/sensor-db.md) 참고)
 
 구독 이벤트
 
-- SensorErrorEvent (Rule Engine Service 발행, sensor.status 갱신용)
+- EnvironmentRangeUpdatedEvent (Sensor Service 발행) — cultivation 상태가 `CREATED`이면
+  `RUNNING`으로 전환. `environment_setting`이 Sensor Service로 이관되며 "환경 저장 + 상태
+  전환"이 하나의 로컬 트랜잭션일 수 없게 되어 이벤트 기반으로 대체했습니다.
+
+(기존 `SensorErrorEvent` 구독은 `sensor.status` 갱신용이었는데, 해당 컬럼이 Sensor Service로
+이관되면서 구독 주체도 Sensor Service로 바뀌었습니다.)
