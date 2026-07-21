@@ -21,7 +21,7 @@ Sensor Service가 이를 구독하여 InfluxDB에 저장합니다.
 | Service | 역할 |
 |----------|------|
 | Sensor Service | 센서 데이터 저장 및 조회 |
-| AI Service | 주간/월간 데이터 분석 |
+| AI Service | 주간 데이터 분석 (Sensor Service의 Weekly Scheduler를 통해 간접적으로) |
 
 ---
 
@@ -166,7 +166,8 @@ Light
 
 # 집계(Aggregation)
 
-주간 및 월간 AI 리포트를 위해 집계 데이터를 생성합니다.
+주간 AI 리포트를 위해 집계 데이터를 생성합니다. 재배 기간이 한 달을 넘지 않아 월간 집계는
+하지 않습니다.
 
 주요 집계 항목
 

@@ -40,6 +40,13 @@ Bearer JWT
 > Redis 캐시(동일 질문 재요청 시 LLM 재호출 방지용)는 역할이 겹치지 않아 그대로 유지됩니다.
 > (자세한 내용은 [ai-db.md](../03_Database/ai-db.md) 참고)
 
+> ℹ️ **변경 이력**: 월간 리포트를 폐기하고(재배 기간이 한 달을 넘지 않아 의미 없음), 리포트
+> 생성 방식을 사용자 요청 기반(`POST /report`)에서 **Sensor Service의 Weekly Scheduler가
+> 매주 먼저 생성해 두는 방식**으로 바꿨습니다. `POST /report`는 제거되었고, 이미 생성된
+> 리포트를 읽기만 하는 `GET /report`로 대체되었습니다. 또한 "일일 피드백" 기능이 추가되어
+> `GET /feedback/daily`로 조회할 수 있습니다. (자세한 내용은
+> [ai-report.md](../04_sequence/ai-report.md), [daily-feedback.md](../04_sequence/daily-feedback.md) 참고)
+
 ---
 
 # 생육 분석 (Vision)
@@ -256,20 +263,20 @@ AI Service
 
 ---
 
-# AI 리포트 생성
+# AI 리포트 조회
 
-## POST /report
+## GET /report
 
-### Request
+이미 생성된 가장 최근 주간 리포트를 조회합니다. 리포트 생성 자체는 이 API가 트리거하지
+않으며, Sensor Service의 Weekly Scheduler가 매주 미리 만들어 둡니다(자세한 내용은
+[ai-report.md](../04_sequence/ai-report.md) 참고). 재배 기간이 한 달을 넘지 않아 월간
+리포트는 제공하지 않습니다.
 
-```json
-{
-    "cultivationId": 3,
-    "period": "weekly"
-}
-```
+### Query Parameter
 
-`period`는 `weekly` 또는 `monthly` 입니다.
+| 이름 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| cultivationId | long | O | 조회할 재배 ID |
 
 ---
 
@@ -279,15 +286,11 @@ AI Service
 
 ↓
 
-Redis 캐시 조회 (report:{cultivationId}:{period})
+Redis 조회 (report:{cultivationId}:weekly)
 
 ↓
 
-Cache Miss 시 Sensor Service 통계 조회 (InfluxDB)
-
-↓
-
-LLM
+없으면(아직 첫 주간 리포트가 생성되지 않음) AI011 반환
 
 ---
 
@@ -301,6 +304,57 @@ LLM
     "environmentMaintainRate": 95,
     "autoControlCount": 6,
     "report": "지난 7일 동안 평균 온도는 22.1℃로 적정 범위를 유지했습니다. 전체적으로 매우 안정적인 재배 환경을 유지하고 있습니다."
+}
+```
+
+---
+
+# 일일 피드백 조회
+
+## GET /feedback/daily
+
+특정 재배에 대해 지금까지 생성된 일일 피드백을 최신순으로 조회합니다. 생성 자체는 이 API가
+트리거하지 않으며, Daily Scheduler가 매일 자동으로 생성합니다(자세한 내용은
+[daily-feedback.md](../04_sequence/daily-feedback.md) 참고).
+
+### Query Parameter
+
+| 이름 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| cultivationId | long | O | 조회할 재배 ID |
+| page | int | X | 페이지 번호 (기본값 0) |
+| size | int | X | 페이지 크기 (기본값 20) |
+
+---
+
+### Process
+
+AI Service
+
+↓
+
+`daily_feedback` 조회 (cultivationId, 요청자 소유 검증, 최신순)
+
+---
+
+### Response
+
+```json
+{
+    "feedbacks": [
+        {
+            "feedbackDate": "2026-08-15",
+            "hasGrowthData": true,
+            "content": "온도를 22℃에서 24℃로 높인 이후 균사 성장률이 평균 6%p 개선되는 추세입니다.",
+            "createdAt": "2026-08-15T23:00:00"
+        },
+        {
+            "feedbackDate": "2026-08-14",
+            "hasGrowthData": false,
+            "content": "전날 사진이 없어 피드백을 남길 수 없습니다.",
+            "createdAt": "2026-08-14T23:00:00"
+        }
+    ]
 }
 ```
 
@@ -320,6 +374,10 @@ LLM
 | AI008 | 버섯 가이드 생성 실패 (LLM 응답 실패, Cultivation Service RAG 컨텍스트 조회 실패 포함) |
 | AI009 | chat_message 저장 실패 (PostgreSQL) |
 | AI010 | 다른 사용자의 재배에 대한 대화 이력 조회 시도 |
+| AI011 | 아직 생성된 주간 리포트 없음 |
+| AI012 | growth_record 저장 실패 (PostgreSQL) |
+| AI013 | daily_feedback 저장 실패 (PostgreSQL) |
+| AI014 | 일일 피드백 생성 시 Cultivation Service 호출 실패 (environment_setting 조회 실패) |
 
 ---
 
@@ -329,15 +387,17 @@ LLM
 
 ```
 Embedding Service (챗봇 유사 재배 사례 검색, 선택적 호출)
-Sensor Service (센서 데이터/통계 조회)
+Sensor Service (센서 데이터 조회, 챗봇에서 참고용으로 사용. 주간 통계는 더 이상 요청 시점에 조회하지 않음)
 Cultivation Service (버섯 가이드 RAG 컨텍스트 조회, GET /api/v1/mushroom-references/{mushroomType}, 캐시 미스 시에만)
+Cultivation Service (일일 피드백 생성 시 environment_setting 최근 변경 이력 조회, Daily Scheduler 실행 시)
 ```
 
 호출받는 서비스
 
 ```
 Cultivation Service (생육 사진 Vision 분석 요청)
-API Gateway (AI 챗봇 요청, 버섯 가이드 요청)
+Sensor Service (Weekly Scheduler가 집계한 주간 통계 전달, push)
+API Gateway (AI 챗봇 요청, 버섯 가이드 요청, AI 리포트 조회, 일일 피드백 조회)
 ```
 
 ---
@@ -346,10 +406,13 @@ API Gateway (AI 챗봇 요청, 버섯 가이드 요청)
 
 캐시 대상
 
-- AI 생육 분석 결과 (ai:{cultivationId}:analysis, TTL 6시간)
+- AI 생육 분석 결과 (ai:{cultivationId}:analysis, TTL 6시간) — `growth_record`에도 영구 저장됨
 - AI 챗봇 응답 (ai:{hash}, TTL 24시간)
-- AI 리포트 (report:{cultivationId}:{period}, TTL 24시간)
+- AI 리포트 (report:{cultivationId}:weekly, TTL 24시간) — Weekly Scheduler가 push로 미리 채워둠
 - 버섯 가이드 (ai:mushroom:{mushroomType}:guide, TTL 7일) — cultivationId가 아닌 mushroomType 기준으로 캐싱됩니다.
+
+일일 피드백은 Redis에 캐시하지 않고 `daily_feedback` 테이블에 바로 영구 저장합니다(하루에
+한 번만 생성되므로 캐시가 불필요).
 
 ---
 

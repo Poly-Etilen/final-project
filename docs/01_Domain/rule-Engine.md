@@ -203,7 +203,7 @@ Rule Engine Service는 REST API를 제공하지 않습니다.
 
 MQTT 수신과 RabbitMQ 발행만으로 동작하는 이벤트/메시지 기반 서비스입니다.
 
-현재 환경 조회, 통계, 차트, 주간/월간 리포트 데이터가 필요하면 [sensor-api.md](../02_API/sensor-api.md)를 참고하세요.
+현재 환경 조회, 통계, 차트, 주간 리포트 데이터가 필요하면 [sensor-api.md](../02_API/sensor-api.md)를 참고하세요.
 
 ---
 

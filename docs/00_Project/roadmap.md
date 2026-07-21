@@ -71,7 +71,7 @@ Rule Engine과 Sensor는 책임을 분리해 별도 서비스로 개발합니다
 - AI Service
 - Embedding Service
 - Rule Engine Service (MQTT 수신/Collector, 검증, 규칙 평가, 자동 제어, 센서 오류 감지)
-- Sensor Service (측정값 저장/조회, 통계·차트, 주간/월간 리포트 집계)
+- Sensor Service (측정값 저장/조회, 통계·차트, 주간 리포트 집계)
 - Notification Service
 - DatasourceGenerator (기존 Datasource Service 리네임)
 
@@ -183,5 +183,5 @@ AI 기반 기능을 구현합니다.
 - IoT 기반 실시간 센서 모니터링
 - Rule Engine 기반 자동 환경 제어
 - AI 생육 분석 및 수확 예측
-- AI 주간·월간 리포트 제공
+- AI 주간 리포트 및 일일 피드백 제공
 - Kubernetes 기반 MSA 서비스 운영

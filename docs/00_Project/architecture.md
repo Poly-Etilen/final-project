@@ -13,7 +13,7 @@ Sensor Service(저장·조회)로 다시 분리했습니다.
 - AI Service
 - Embedding Service
 - Rule Engine Service (MQTT 수신/Collector, 검증, 규칙 평가, 자동 제어, 센서 오류 감지)
-- Sensor Service (측정값 저장/조회, 통계·차트, 주간/월간 리포트 집계)
+- Sensor Service (측정값 저장/조회, 통계·차트, 주간 리포트 집계)
 - Notification Service
 - DatasourceGenerator (기존 Datasource Service 리네임)
 
@@ -29,7 +29,7 @@ Rule Engine Service와 Sensor Service는 RabbitMQ(EnvironmentMeasuredEvent)로�
 - Auth (users 단일 테이블)
 - Cultivation
 - Notification (알림 이력)
-- AI (챗봇 대화 이력)
+- AI (챗봇 대화 이력, 생육 분석 이력, 일일 피드백 이력)
 
 ---
 

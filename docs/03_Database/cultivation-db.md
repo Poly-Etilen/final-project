@@ -55,6 +55,18 @@ Environment Setting이 생성됩니다. 이때 API로 주고받는 단일 목표
 > 구독해 Elasticsearch의 `mushroom_environment` 인덱스를 갱신합니다. (자세한 내용은
 > [elasticSearch.md](./elasticSearch.md), [embedding.md](../01_Domain/embedding.md) 참고)
 
+> ℹ️ **변경 이력**: `environment_setting`을 "cultivation당 1행(범위 8개 컬럼)" 구조에서
+> "항목(type)별로 여러 행이 쌓이는" 구조로 전면 재설계했습니다. 계기는 AI Service의 "일일
+> 피드백" 기능(사용자가 환경을 수정했을 때 그 이후 생육이 실제로 어떻게 달라졌는지 매일
+> 비교해 알려주는 기능)을 만들려면 "몇 시에 몇 도에서 몇 도로 바꿨는지"에 대한 이력이 필요한데,
+> 기존 구조는 `cultivation_id UNIQUE`라 수정할 때마다 이전 값을 덮어써 이력이 전혀 남지
+> 않았기 때문입니다. 처음에는 별도 `environment_setting_history` 테이블을 추가하는 방안도
+> 검토했지만, 테이블 자체를 항목(TEMPERATURE/HUMIDITY/CO2/LIGHT)별 행으로 나누고 수정 시
+> UPDATE 대신 INSERT만 하도록 바꾸면 `environment_setting` 하나로 "현재값"과 "이력"을 동시에
+> 표현할 수 있어 이 방식으로 확정했습니다. `cultivation_id`는 더 이상 UNIQUE가 아니며,
+> `cultivation`과의 관계도 1:1에서 1:N으로 바뀌었습니다. (자세한 내용은 아래 "environment_setting"
+> 섹션, [daily-feedback.md](../04_sequence/daily-feedback.md) 참고)
+
 ---
 
 # ERD
@@ -98,18 +110,14 @@ PK  id
           │
           │
           ▼
-environment_setting
+environment_setting  (1:N — cultivation당 여러 row, 항목별 × 이력별)
 ──────────────────────────────────────────────
 PK  id
 FK  cultivation_id
-    temp_min
-    temp_max
-    humidity_min
-    humidity_max
-    co2_min
-    co2_max
-    light_min
-    light_max
+    type
+    min
+    max
+    unit
     created_at
     updated_at
 
@@ -212,10 +220,16 @@ FK  cultivation_id
 
 ## environment_setting
 
-사용자가 최종 저장한 환경값을 **범위(min~max)** 로 저장합니다.
+사용자가 최종 저장한 환경값을 **범위(min~max)** 로, 항목(type)별 행으로 저장합니다.
 
 단일 목표값이 아닌 범위로 저장하는 이유는 Rule Engine Service의 자동 제어가
 값이 범위를 벗어날 때만 장치를 동작시키고, 범위 안에서는 불필요하게 켜고 끄지 않도록(허용 오차/히스테리시스) 하기 위함입니다.
+
+기존에는 재배(cultivation)당 1행에 8개 컬럼(temp_min/max, humidity_min/max, co2_min/max,
+light_min/max)을 한 번에 담았지만, 지금은 `type`(TEMPERATURE/HUMIDITY/CO2/LIGHT)별로 별도
+행을 갖습니다. 수정할 때도 UPDATE가 아니라 새 행을 INSERT합니다 — 이 테이블 하나가 "현재값"과
+"이력"을 동시에 표현하기 위해서입니다. "현재값"이 필요하면 `(cultivation_id, type)` 기준으로
+가장 최신 행(`created_at DESC LIMIT 1`)을 조회합니다.
 
 mushroom_reference 조회 결과(추천값, 범위 형태)는 그대로 저장하지 않습니다. 사용자가 이 추천값을
 참고해서 **단일 목표값**으로 환경 저장 API(`PATCH /environment`)를 호출하면, 그 시점에
@@ -223,20 +237,20 @@ Cultivation Service가 단일값을 범위로 변환해 저장합니다. 아래 
 조회 응답에서 다시 단일값이 필요하면 저장된 범위의 중간값을 계산합니다. (아래 "범위 → 단일값
 역변환" 참고)
 
-| Column | Type |
-|---------|------|
-| id | BIGSERIAL |
-| cultivation_id | BIGINT |
-| temp_min | DECIMAL(4,1) |
-| temp_max | DECIMAL(4,1) |
-| humidity_min | DECIMAL(4,1) |
-| humidity_max | DECIMAL(4,1) |
-| co2_min | INT |
-| co2_max | INT |
-| light_min | INT |
-| light_max | INT |
-| created_at | TIMESTAMP |
-| updated_at | TIMESTAMP |
+| Column | Type | NULL | 설명 |
+|---------|------|------|------|
+| id | BIGSERIAL | X | PK |
+| cultivation_id | BIGINT | X | 재배 (FK) |
+| type | VARCHAR(20) | X | 환경 항목 (TEMPERATURE/HUMIDITY/CO2/LIGHT) |
+| min | DECIMAL(4,1) | X | 하한 |
+| max | DECIMAL(4,1) | X | 상한 |
+| unit | VARCHAR(10) | O | 단위 (예: ℃, %, ppm, lux) |
+| created_at | TIMESTAMP | X | 이 값이 저장된 시각 (= 사실상 "언제 이 값으로 바뀌었는지") |
+| updated_at | TIMESTAMP | X | 생성 시각과 동일하게 유지됨 (아래 "고려 사항" 참고) |
+
+`min`/`max`를 `DECIMAL(4,1)`로 통일했습니다. 기존에는 CO₂/조도가 `INT`였지만, 하나의 컬럼을
+모든 항목이 공유하는 구조라 온도의 소수점 정밀도(예: 15.5℃)를 살리는 쪽으로 맞췄습니다. CO₂/
+조도 값은 정수로 들어와도 `DECIMAL(4,1)`에 그대로 저장됩니다(예: `750.0`).
 
 ---
 
@@ -404,23 +418,15 @@ CREATE TABLE environment_setting (
 
     id BIGSERIAL PRIMARY KEY,
 
-    cultivation_id BIGINT NOT NULL UNIQUE,
+    cultivation_id BIGINT NOT NULL,
 
-    temp_min DECIMAL(4,1) NOT NULL,
+    type VARCHAR(20) NOT NULL,
 
-    temp_max DECIMAL(4,1) NOT NULL,
+    min DECIMAL(4,1) NOT NULL,
 
-    humidity_min DECIMAL(4,1) NOT NULL,
+    max DECIMAL(4,1) NOT NULL,
 
-    humidity_max DECIMAL(4,1) NOT NULL,
-
-    co2_min INT NOT NULL,
-
-    co2_max INT NOT NULL,
-
-    light_min INT NOT NULL,
-
-    light_max INT NOT NULL,
+    unit VARCHAR(10),
 
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -429,10 +435,19 @@ CREATE TABLE environment_setting (
     CONSTRAINT fk_environment_cultivation
         FOREIGN KEY (cultivation_id)
         REFERENCES cultivation(id)
-        ON DELETE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT chk_environment_type CHECK (type IN (
+        'TEMPERATURE', 'HUMIDITY', 'CO2', 'LIGHT'
+    ))
 
 );
 ```
+
+`cultivation_id`에 더 이상 `UNIQUE`를 걸지 않습니다. 항목별로 여러 행이 있고(4종), 수정할
+때마다 새 행이 쌓이기 때문입니다(이력 겸용). `updated_at`은 이 테이블에서 실질적으로 항상
+`created_at`과 같은 값을 갖습니다 — 행을 UPDATE하는 경로가 없기 때문입니다(아래 "고려 사항"
+참고).
 
 ---
 
@@ -543,8 +558,19 @@ ON cultivation(status);
 ## environment_setting
 
 ```sql
-CREATE UNIQUE INDEX uk_environment_cultivation
-ON environment_setting(cultivation_id);
+CREATE INDEX idx_environment_setting_cultivation_type
+ON environment_setting(cultivation_id, type, created_at DESC);
+```
+
+"재배의 각 항목별 현재값(최신 행)"을 조회하는 것이 가장 흔한 접근 패턴이라, `cultivation_id`
++ `type` + `created_at DESC` 복합 인덱스 하나로 커버합니다. PostgreSQL의 `DISTINCT ON`을
+활용하면 재배 하나의 "현재 환경 전체"를 한 번의 쿼리로 가져올 수 있습니다.
+
+```sql
+SELECT DISTINCT ON (type) *
+FROM environment_setting
+WHERE cultivation_id = ?
+ORDER BY type, created_at DESC;
 ```
 
 ---
@@ -656,7 +682,7 @@ CO₂
 
 조도
 
-를 수정합니다. (API 요청/응답은 단일 목표값 그대로 사용)
+중 하나 이상을 수정합니다. (API 요청/응답은 단일 목표값 그대로 사용, 항목별로 부분 수정 가능)
 
 ↓
 
@@ -664,20 +690,24 @@ CO₂
 
 ↓
 
-Cultivation Service가 단일 목표값을 허용 오차만큼 확장하여 범위로 변환
+Cultivation Service가 수정된 항목마다 단일 목표값을 허용 오차만큼 확장하여 범위로 변환
 
 ↓
 
-environment_setting 생성 (temp_min/max, humidity_min/max, co2_min/max, light_min/max)
+environment_setting에 항목별로 새 행 INSERT (수정되지 않은 항목은 기존 최신 행 그대로 유지)
+
+타입별 행 구조라, 예를 들어 사용자가 온도만 바꾸면 `type = 'TEMPERATURE'`인 행 하나만 새로
+INSERT되고 습도/CO₂/조도의 최신 행은 그대로 남습니다. (자세한 내용은 위 "environment_setting"
+테이블 설명 참고)
 
 ### 단일값 → 범위 변환 기준 (기본값)
 
-| 항목 | 허용 오차 | 예시 (목표값 → 저장 범위) |
+| 항목 (type) | 허용 오차 | 예시 (목표값 → 저장 범위) |
 |------|-----------|---------------------------|
-| Temperature | ±1.5℃ | 22℃ → temp_min 20.5 / temp_max 23.5 |
-| Humidity | ±5% | 90% → humidity_min 85 / humidity_max 95 |
-| CO₂ | ±50ppm | 800ppm → co2_min 750 / co2_max 850 |
-| Light | ±30lux | 350lux → light_min 320 / light_max 380 |
+| TEMPERATURE | ±1.5℃ | 22℃ → min 20.5 / max 23.5 |
+| HUMIDITY | ±5% | 90% → min 85 / max 95 |
+| CO2 | ±50ppm | 800ppm → min 750 / max 850 |
+| LIGHT | ±30lux | 350lux → min 320 / max 380 |
 
 허용 오차 값은 재배 환경 저장 API 요청/응답에는 노출되지 않으며, Cultivation Service 내부 저장 로직에만 적용됩니다.
 값은 향후 버섯 종류별로 다르게 조정될 수 있습니다.
@@ -685,15 +715,15 @@ environment_setting 생성 (temp_min/max, humidity_min/max, co2_min/max, light_m
 ### 범위 → 단일값 역변환 (조회 시)
 
 environment_setting에는 min/max만 저장되며, 사용자가 입력했던 단일 목표값은 별도 컬럼으로 저장하지
-않습니다. `GET /cultivations/{id}` 등 조회 API가 단일값을 응답해야 할 때는 저장된 범위의
-**중간값**을 계산해서 사용합니다.
+않습니다. `GET /cultivations/{id}` 등 조회 API가 단일값을 응답해야 할 때는 항목별 **최신 행**을
+조회한 뒤, 그 범위의 **중간값**을 계산해서 사용합니다.
 
 ```
 단일값 = (min + max) / 2
 ```
 
 허용 오차가 항상 대칭(±고정값)으로 적용되므로, 이 중간값은 사용자가 원래 입력했던 단일 목표값과
-정확히 일치합니다. 예시: temp_min 20.5 / temp_max 23.5 → (20.5+23.5)/2 = 22.0℃ (원본 입력값과 동일)
+정확히 일치합니다. 예시: `type = 'TEMPERATURE'`의 최신 행이 min 20.5 / max 23.5 → (20.5+23.5)/2 = 22.0℃ (원본 입력값과 동일)
 
 이 계산은 Cultivation Service가 조회 시점에 매번 수행하며, 별도로 캐싱하거나 추가 컬럼에
 저장하지 않습니다.
@@ -756,7 +786,7 @@ userId
 
 Cultivation
 
-↓
+↓ (1:N — 항목별 × 이력별 여러 row)
 
 Environment Setting
 
@@ -812,8 +842,9 @@ LLM 프롬프트에 RAG 컨텍스트로 삽입 → "버섯 가이드"(효능/주
 - characteristics/health_benefits/cultivation_guide/additional_info는 AI Service가 "버섯 가이드" 기능에서 LLM 프롬프트의 RAG 컨텍스트로만 사용하며, 그대로 응답에 노출하지 않습니다.
 - environment_setting은 단일 목표값이 아닌 범위(min~max)로 저장합니다. Rule Engine Service가 범위를 벗어날 때만 장치를 제어하도록 하여 불필요한 On/Off를 줄이기 위함입니다.
 - 단일값 → 범위 변환은 Cultivation Service 내부 로직이며, API 요청/응답 스펙에는 영향을 주지 않습니다.
-- 반대로 조회 시 단일값이 필요하면 저장된 범위의 중간값 `(min+max)/2`를 계산합니다. 허용 오차가 대칭이므로 이 값은 사용자가 원래 입력했던 단일값과 정확히 일치하며, 별도 컬럼에 원본값을 중복 저장하지 않습니다.
-- Environment Setting은 Cultivation당 하나만 존재합니다.
+- 반대로 조회 시 단일값이 필요하면 항목별 최신 행의 범위에서 중간값 `(min+max)/2`를 계산합니다. 허용 오차가 대칭이므로 이 값은 사용자가 원래 입력했던 단일값과 정확히 일치하며, 별도 컬럼에 원본값을 중복 저장하지 않습니다.
+- Environment Setting은 Cultivation당 항목(TEMPERATURE/HUMIDITY/CO2/LIGHT)별로 여러 행이 쌓이며, UPDATE 없이 항상 INSERT만 합니다. 이 테이블 하나가 "현재값"(항목별 최신 행)과 "이력"(전체 행)을 동시에 표현합니다. `updated_at` 컬럼은 두었지만 UPDATE 경로가 없어 실질적으로 `created_at`과 항상 같습니다.
+- 데이터가 무한히 쌓이는 이력성 테이블이라, 운영 단계에서는 오래된 이력에 대한 보관 주기 정책이 필요할 수 있습니다(추후 개발 예정).
 - Harvest는 재배 종료 후에만 생성됩니다.
 - 센서 "장치" 메타데이터(sensor 테이블)는 Cultivation DB(PostgreSQL)에 저장하지만, 센서가 측정한 "값"(시계열)은 Sensor Service의 InfluxDB에서 관리하며 이 DB에는 저장하지 않습니다. 두 "sensor"는 서로 다른 데이터입니다.
 - sensor.device_eui는 대리키가 아닌 사용자가 입력하는 장치 고유 식별자를 그대로 PK로 사용합니다.

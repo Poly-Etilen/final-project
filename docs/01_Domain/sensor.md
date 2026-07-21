@@ -3,11 +3,18 @@
 ## 역할
 
 Sensor Service는 Rule Engine Service로부터 전달받은 센서 측정값을 저장하고,
-현재 환경/통계/차트/주간·월간 리포트 데이터를 조회할 수 있도록 제공하는 서비스입니다.
+현재 환경/통계/차트/주간 리포트 데이터를 조회할 수 있도록 제공하는 서비스입니다.
 
 > ℹ️ **변경 이력**: 한때 Rule Engine Service와 하나로 통합하는 방안을 검토했었지만,
-> 저장·조회 책임(Redis/InfluxDB, 통계·차트 API, 주간/월간 리포트 집계)의 크기와 변경 주기가
+> 저장·조회 책임(Redis/InfluxDB, 통계·차트 API, 주간 리포트 집계)의 크기와 변경 주기가
 > 규칙 평가/자동 제어 로직과 달라 다시 별도 서비스로 분리했습니다.
+
+> ℹ️ **변경 이력**: 월간 리포트를 폐기했습니다. 버섯 재배 기간이 한 달을 넘지 않아 "월간"
+> 단위 자체가 의미가 없다고 판단했습니다. 이와 함께 리포트 생성 방식도 "사용자가 요청할 때
+> 그때 생성"(pull)에서 **Weekly Scheduler가 주기적으로 먼저 집계해 AI Service에 전달하고
+> AI Service가 리포트를 미리 만들어 두는 방식**(push)으로 정리했습니다. 이전 문서에는 두
+> 방식이 섞여서(Scheduler 존재 + 동시에 요청 시 동기 생성) 서로 모순되게 적혀 있었습니다.
+> (자세한 내용은 [ai.md](./ai.md), [ai-report.md](../04_sequence/ai-report.md) 참고)
 > Rule Engine Service와는 RabbitMQ(EnvironmentMeasuredEvent)로만 연결되며, 직접 호출하지 않습니다.
 
 > ℹ️ **변경 이력**: 센서가 1초 주기로 값을 보내는 경우, EnvironmentMeasuredEvent도 매초 발행되어
@@ -23,7 +30,7 @@ Sensor Service는 Rule Engine Service로부터 전달받은 센서 측정값을 
 - 센서 데이터 저장 (Redis 최신값 매초, InfluxDB 이력은 10초 간격 스로틀링)
 - 실시간 환경 조회
 - 환경 통계 / 차트 데이터 제공
-- 주간 / 월간 데이터 집계 및 AI Service 전달
+- 주간 데이터 집계 및 AI Service 전달 (Scheduler, push)
 
 센서 수신, 검증, 규칙 평가, 자동 제어는 Rule Engine Service의 책임입니다.
 Rule Engine Service는 매초 EnvironmentMeasuredEvent를 발행하며, 저장 빈도 조절(스로틀링)은
@@ -85,9 +92,11 @@ InfluxDB에서 기간별 통계와 차트 데이터를 조회합니다.
 
 ---
 
-## 주간 / 월간 데이터 집계
+## 주간 데이터 집계
 
-Scheduler를 통해 주간/월간 환경 데이터를 집계하여 AI Service에 제공합니다.
+Weekly Scheduler가 InfluxDB의 환경 데이터를 집계해 AI Service에 전달하고, AI Service가 그
+자리에서 리포트를 생성하도록 트리거합니다. 사용자가 요청하는 시점이 아니라 Sensor Service가
+먼저 능동적으로(push) 집계 데이터를 만들어 전달합니다.
 
 ---
 
@@ -116,10 +125,6 @@ GET /sensors/chart
 GET /sensors/report/weekly
 
 ---
-
-## 월간 데이터 조회
-
-GET /sensors/report/monthly
 
 센서 데이터 수신, 규칙 평가, 자동 제어는 이 서비스가 아닌 Rule Engine Service가 담당하며 REST API로 노출하지 않습니다.
 
@@ -183,8 +188,7 @@ InfluxDB와 달리 스로틀링을 적용하지 않습니다 — Redis 덮어쓰
 
 ### AI Service
 
-- 주간 리포트 생성 요청
-- 월간 리포트 생성 요청
+- Weekly Scheduler가 집계한 주간 통계를 전달해 리포트 생성을 트리거 (push, OpenFeign)
 
 ---
 
@@ -234,13 +238,9 @@ Redis에는 매번 저장하고, InfluxDB에는 재배별 10초 스로틀링을 
 
 ## Weekly Scheduler
 
-매주 InfluxDB 데이터를 집계하여 AI Service로 전달합니다.
-
----
-
-## Monthly Scheduler
-
-매월 InfluxDB 데이터를 집계하여 AI Service로 전달합니다.
+매주 InfluxDB 데이터를 집계하여 AI Service로 전달합니다(OpenFeign). 사용자 요청을 기다리지
+않고 Scheduler가 먼저 집계·전달하며, AI Service는 이를 받아 리포트를 생성하고
+`WeeklyReportCompletedEvent`를 발행합니다. (자세한 내용은 [ai.md](./ai.md) 참고)
 
 ---
 

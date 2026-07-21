@@ -15,6 +15,15 @@ LLM은 Vision 모델이 산출한 지표를 새로 추정하지 않고, 그 지�
 harvest.md의 수확 전 생육 분석과 동일한 분석 로직을 사용하지만,
 이 시퀀스는 수확 여부와 관계없이 재배 상세 화면에서 사용자가 원할 때마다 사진을 찍어 실행할 수 있습니다.
 
+> ℹ️ **변경 이력**: 분석 결과가 `ai:{cultivationId}:analysis` Redis 캐시(TTL 6시간)뿐 아니라
+> `growth_record` 테이블(PostgreSQL, AI DB)에도 영구 저장되도록 바뀌었습니다. "일일
+> 피드백"(사용자가 환경을 수정했을 때 생육이 실제로 어떻게 달라졌는지 매일 비교해 알려주는
+> 기능)이 여러 날짜에 걸친 생육 추이를 비교해야 하는데, 6시간짜리 캐시만으로는 하루만
+> 지나도 비교할 데이터가 사라지기 때문입니다. Redis 캐시는 "방금 분석한 결과를 재요청 없이
+> 즉시 재조회"하는 성능 캐시로 그대로 유지되고, `growth_record`는 만료되지 않는 이력
+> 저장소입니다. (자세한 내용은 [ai-db.md](../03_Database/ai-db.md),
+> [daily-feedback.md](./daily-feedback.md) 참고)
+
 ---
 
 # Sequence
@@ -64,7 +73,7 @@ LLM
 
 ↓
 
-Redis 저장
+Redis 저장 + growth_record 저장 (PostgreSQL)
 
 ↓
 
@@ -231,7 +240,9 @@ LLM은 위 지표를 새로 추정하지 않고, 해석 문장과 개선 방안�
 
 ---
 
-## 8. Redis 저장
+## 8. Redis 저장 + growth_record 저장
+
+Redis
 
 Key
 
@@ -246,6 +257,12 @@ TTL
 ```
 
 이후 같은 사진에 대한 재조회는 Redis에서 즉시 반환됩니다.
+
+PostgreSQL (AI DB)
+
+이와 별개로 분석 결과를 `growth_record`에 한 행으로 영구 저장합니다. Redis 캐시는 TTL이
+지나면 사라지지만, `growth_record`는 만료되지 않고 계속 쌓여 "일일 피드백"이 여러 날짜의
+생육 추이를 비교하는 데 사용됩니다. (자세한 내용은 [daily-feedback.md](./daily-feedback.md) 참고)
 
 ---
 
@@ -289,6 +306,7 @@ Redis에 저장된 마지막 결과를 반환하며, Vision 모델을 다시 실
 
 ```
 photo (Cultivation DB)
+growth_record (AI DB)
 ```
 
 ---
@@ -328,6 +346,7 @@ AI
 - Vision 모델 분석 실패
 - LLM 응답 실패
 - Redis 장애
+- growth_record 저장 실패 (PostgreSQL) — 저장에 실패해도 분석 응답 자체는 사용자에게 반환합니다
 
 ---
 
@@ -338,5 +357,7 @@ AI
 - 사진은 카메라 센서가 아닌 사용자가 앱/웹에서 직접 촬영하여 업로드합니다.
 - 사진 업로드와 분석은 하나의 요청(POST /photos)으로 함께 처리됩니다.
 - FINISHED 상태인 재배는 생육 분석 대신 재배 이력 정보를 제공합니다.
-- 분석 결과는 별도 테이블에 저장하지 않고 Redis에만 일정 시간 캐시합니다. 사진 자체(photo 테이블)는 이력으로 계속 보관합니다.
+- 분석 결과는 Redis(`ai:{cultivationId}:analysis`, TTL 6시간, 빠른 재조회용)와 `growth_record`
+  (PostgreSQL, 영구 보관, 일일 피드백용) 두 곳에 함께 저장됩니다. 사진 자체(photo 테이블)는
+  Cultivation DB에 이력으로 계속 보관됩니다.
 - 캐시 TTL은 리포트(24시간)보다 짧게 설정하여 비교적 최신 상태를 반영합니다.

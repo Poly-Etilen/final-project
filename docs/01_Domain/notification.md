@@ -14,6 +14,11 @@ RabbitMQ를 통해 이벤트를 수신하며,
 > [notification-db.md](../03_Database/notification-db.md),
 > [notification-api.md](../02_API/notification-api.md) 참고)
 
+> ℹ️ **변경 이력**: 월간 AI 리포트 알림을 제거하고 "일일 피드백 알림"을 추가했습니다. 재배
+> 기간이 한 달을 넘지 않아 월간 리포트 자체가 폐기되었고, 대신 AI Service가 매일 발행하는
+> `DailyFeedbackCompletedEvent`를 구독합니다. (자세한 내용은 [ai.md](./ai.md),
+> [daily-feedback.md](../04_sequence/daily-feedback.md) 참고)
+
 ---
 
 # 책임
@@ -66,15 +71,25 @@ Rule Engine이 자동으로 장치를 제어했을 경우 사용자에게 알려
 
 ## AI 리포트 생성 알림
 
-Scheduler 기반으로 생성되는 주간/월간 AI 리포트가 준비되면 사용자에게 알립니다.
+Weekly Scheduler 기반으로 생성되는 주간 AI 리포트가 준비되면 사용자에게 알립니다. 재배
+기간이 한 달을 넘지 않아 월간 리포트는 제공하지 않습니다.
 
 예시
 
 - 이번 주 재배 리포트가 도착했습니다.
-- 이번 달 재배 리포트가 도착했습니다.
 
 AI 생육 분석(Vision)은 사용자가 사진을 업로드하면 그 자리에서 결과가 반환되는 동기 방식이므로
 별도의 알림을 발행하지 않습니다.
+
+---
+
+## 일일 피드백 알림
+
+Daily Scheduler가 매일 재배별로 생성하는 일일 피드백이 준비되면 사용자에게 알립니다.
+
+예시
+
+- 오늘의 재배 피드백이 도착했습니다.
 
 ---
 
@@ -206,9 +221,9 @@ Discord 메시지 전송
 
 ---
 
-### MonthlyReportCompletedEvent
+### DailyFeedbackCompletedEvent
 
-월간 리포트 생성 완료
+일일 피드백 생성 완료
 
 ---
 

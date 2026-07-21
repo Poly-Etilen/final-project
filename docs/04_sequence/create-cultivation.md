@@ -258,11 +258,13 @@ environment_setting
 예시 (허용 오차 적용)
 
 ```
-Temperature 22℃ → temp_min 20.5 / temp_max 23.5
-Humidity 91% → humidity_min 86 / humidity_max 96
+Temperature 22℃ → type=TEMPERATURE, min 20.5 / max 23.5
+Humidity 91% → type=HUMIDITY, min 86 / max 96
 ```
 
-API 요청/응답에는 단일 목표값만 노출되며, 범위 변환은 Cultivation Service 내부 저장 로직입니다.
+항목별로 새 행이 INSERT됩니다(수정하지 않은 항목은 기존 최신 행 유지). API 요청/응답에는
+단일 목표값만 노출되며, 범위 변환은 Cultivation Service 내부 저장 로직입니다. (자세한 내용은
+[cultivation-db.md](../03_Database/cultivation-db.md) 참고)
 
 ↓
 

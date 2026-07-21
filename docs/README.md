@@ -38,11 +38,11 @@ API Gateway를 포함해 9개 서비스로 구성됩니다. (기존 9개 서비�
 |--------|-----------|--------|-----|----------|----------------|
 | API Gateway | 라우팅, 인증 토큰 검증 | - | - | - | 전체 시퀀스 최초 진입점 |
 | Auth | 인증/인가(이메일+구글 소셜 로그인), JWT, 이메일 인증, 회원 프로필/탈퇴/재배 통계 (기존 Auth+User 통합) | [auth.md](./01_Domain/auth.md) | [auth-api.md](./02_API/auth-api.md) | [auth-db.md](./03_Database/auth-db.md) | [signup](./04_sequence/signup.md), [login](./04_sequence/login.md), [withdraw](./04_sequence/withdraw.md) |
-| Cultivation | 재배 생성/관리/수확/사진 업로드, 공공데이터 기반 환경 추천(`mushroom_reference` 조회), 센서 장치 등록/조회/삭제(재배 생성과 동시 등록 가능) | [cultivation.md](./01_Domain/cultivation.md) | [cultivation-api.md](./02_API/cultivation-api.md) | [cultivation-db.md](./03_Database/cultivation-db.md) | [create-cultivation](./04_sequence/create-cultivation.md), [harvest](./04_sequence/harvest.md), [growth-analysis](./04_sequence/growth-analysis.md), [sensor-error](./04_sequence/sensor-error.md) |
-| AI | 생육 분석(Vision), 챗봇(대화 이력 저장/조회), 리포트, 버섯 가이드(효능/주의사항) | [ai.md](./01_Domain/ai.md) | [ai-api.md](./02_API/ai-api.md) | [ai-db.md](./03_Database/ai-db.md), Redis(캐시), MinIO(읽기 전용) | [create-cultivation](./04_sequence/create-cultivation.md), [growth-analysis](./04_sequence/growth-analysis.md), [harvest](./04_sequence/harvest.md), [ai-chat](./04_sequence/ai-chat.md), [ai-report](./04_sequence/ai-report.md) |
+| Cultivation | 재배 생성/관리/수확/사진 업로드, 공공데이터 기반 환경 추천(`mushroom_reference` 조회), 센서 장치 등록/조회/삭제(재배 생성과 동시 등록 가능), 환경 설정 이력 관리(`environment_setting`) | [cultivation.md](./01_Domain/cultivation.md) | [cultivation-api.md](./02_API/cultivation-api.md) | [cultivation-db.md](./03_Database/cultivation-db.md) | [create-cultivation](./04_sequence/create-cultivation.md), [harvest](./04_sequence/harvest.md), [growth-analysis](./04_sequence/growth-analysis.md), [sensor-error](./04_sequence/sensor-error.md) |
+| AI | 생육 분석(Vision), 챗봇(대화 이력 저장/조회), 주간 리포트, 일일 피드백, 버섯 가이드(효능/주의사항) | [ai.md](./01_Domain/ai.md) | [ai-api.md](./02_API/ai-api.md) | [ai-db.md](./03_Database/ai-db.md), Redis(캐시), MinIO(읽기 전용) | [create-cultivation](./04_sequence/create-cultivation.md), [growth-analysis](./04_sequence/growth-analysis.md), [harvest](./04_sequence/harvest.md), [ai-chat](./04_sequence/ai-chat.md), [ai-report](./04_sequence/ai-report.md), [daily-feedback](./04_sequence/daily-feedback.md) |
 | Embedding | 재배 참조 데이터 임베딩·벡터 검색 (AI 챗봇 유사 사례 검색용) | [embedding.md](./01_Domain/embedding.md) | [embedding-api.md](./02_API/embedding-api.md) | [elasticSearch.md](./03_Database/elasticSearch.md) | [ai-chat](./04_sequence/ai-chat.md) |
 | Rule Engine | MQTT 수신(Collector), 검증, 규칙 평가/자동 제어, 센서 오류 감지 | [rule-Engine.md](./01_Domain/rule-Engine.md) | API 없음 (MQTT/RabbitMQ 기반, [rule-engine-api.md](./02_API/rule-engine-api.md) 참고) | Redis(목표 환경 범위 캐시만, 영구 저장소 없음) | [sensor-data](./04_sequence/sensor-data.md), [environment-control](./04_sequence/environment-control.md), [sensor-error](./04_sequence/sensor-error.md) |
-| Sensor | 측정값 저장(Redis/InfluxDB)·조회·통계·주간월간 리포트 집계 | [sensor.md](./01_Domain/sensor.md) | [sensor-api.md](./02_API/sensor-api.md) | [influxdb.md](./03_Database/influxdb.md), [redis.md](./03_Database/redis.md) | [sensor-data](./04_sequence/sensor-data.md), [environment-control](./04_sequence/environment-control.md) |
+| Sensor | 측정값 저장(Redis/InfluxDB)·조회·통계·주간 리포트 집계(Weekly Scheduler) | [sensor.md](./01_Domain/sensor.md) | [sensor-api.md](./02_API/sensor-api.md) | [influxdb.md](./03_Database/influxdb.md), [redis.md](./03_Database/redis.md) | [sensor-data](./04_sequence/sensor-data.md), [environment-control](./04_sequence/environment-control.md) |
 | Notification | WebSocket/Telegram/Discord 알림, 알림 이력 조회/읽음 처리 | [notification.md](./01_Domain/notification.md) | [notification-api.md](./02_API/notification-api.md) (알림 발송 자체는 RabbitMQ 기반) | [notification-db.md](./03_Database/notification-db.md) | [environment-control](./04_sequence/environment-control.md), [harvest](./04_sequence/harvest.md), [sensor-error](./04_sequence/sensor-error.md) |
 | DatasourceGenerator | 센서 데이터 생성/발행 (MQTT Publish 전용, REST API 없음, 기존 Datasource Service 리네임) | [datasource-generator.md](./01_Domain/datasource-generator.md) | API 없음 ([datasource-generator-api.md](./02_API/datasource-generator-api.md) 참고) | DB 없음, 메모리 캐시만 사용 ([datasource-generator-db.md](./03_Database/datasource-generator-db.md) 참고) | [sensor-data](./04_sequence/sensor-data.md) |
 
@@ -87,7 +87,7 @@ Rule Engine Service의 자동 제어가 값이 범위를 벗어날 때만 장치
 
 - 환경 설정 저장 API(`PATCH /cultivations/{id}/environment`)는 그대로 단일 목표값을 주고받습니다. (재배 생성 시 보여주는 추천값은 이후 결정 사항 9번에서 범위 형태로 바뀌었습니다.)
 - Cultivation Service가 저장 시점에 단일 목표값에 허용 오차를 적용해 범위로 변환합니다. (예: 온도 22℃ ± 1.5℃ → temp_min 20.5 / temp_max 23.5)
-- 컬럼명은 `temp_min`/`temp_max`, `humidity_min`/`humidity_max`, `co2_min`/`co2_max`, `light_min`/`light_max`입니다.
+- 컬럼명은 `temp_min`/`temp_max`, `humidity_min`/`humidity_max`, `co2_min`/`co2_max`, `light_min`/`light_max`였습니다. **(결정 사항 22번에서 항목별 행 구조로 재설계되며 `(type, min, max, unit)`으로 바뀌었습니다. 아래 22번 참고.)**
 - Rule Engine Service는 현재 센서값이 이 범위를 벗어날 때만 장치를 제어합니다. (자세한 내용은 [cultivation-db.md](./03_Database/cultivation-db.md), [rule-Engine.md](./01_Domain/rule-Engine.md) 참고)
 
 ### 7. Rule Engine Service가 목표 환경 범위를 Redis에 캐싱한다
@@ -247,6 +247,43 @@ MQTT로 보내는 페이로드를 확인해보니 `device_eui`가 `"24e124128c06
 - 두 서비스 모두 기존 Auth DB/Cultivation DB에 얹지 않고 완전히 독립된 새 DB로 만들었습니다("서비스마다 자기 DB만 소유한다"는 기존 원칙을 그대로 유지).
 - 테이블/컬럼 설계 과정에서 `harvest.cultivation_id UNIQUE`(재배당 수확 1회만 허용) 제약이 실제 버섯 재배(여러 번 수확하는 "플러시")와 맞지 않을 수 있다는 점도 별도로 논의되었으나, 이번 변경 범위에는 포함하지 않았습니다(추후 검토 필요).
 - (자세한 내용은 [notification-db.md](./03_Database/notification-db.md), [notification-api.md](./02_API/notification-api.md), [notification.md](./01_Domain/notification.md), [ai-db.md](./03_Database/ai-db.md), [ai-api.md](./02_API/ai-api.md), [ai.md](./01_Domain/ai.md), [database-overview.md](./03_Database/database-overview.md) 참고)
+
+### 20. 월간 리포트를 폐기하고, 리포트 생성 방식을 사용자 요청(pull)에서 Scheduler 기반(push)으로 통일했다
+
+버섯 재배 기간이 한 달을 넘지 않는다는 도메인 특성을 다시 짚으면서, "월간" 단위 리포트 자체가
+성립하지 않는다는 점을 확인했습니다. 동시에 리포트 생성 방식이 문서마다 서로 다르게(Scheduler가
+미리 생성 vs 사용자 요청 시 동기 생성) 적혀 있던 모순도 함께 정리했습니다.
+
+- `sensor.md`의 Monthly Scheduler, `GET /sensors/report/monthly`, `sensor-api.md`의 월간 데이터 조회, `ai.md`/`ai-api.md`/`notification.md`의 `MonthlyReportCompletedEvent`/월간 알림을 모두 제거했습니다.
+- 리포트 생성은 이제 Sensor Service의 Weekly Scheduler가 매주 먼저 InfluxDB 집계 데이터를 AI Service에 전달(push)하고, AI Service가 그 자리에서 리포트를 생성해 Redis(`report:{cultivationId}:weekly`)에 저장한 뒤 `WeeklyReportCompletedEvent`를 발행합니다.
+- 기존 `POST /ai/report`(사용자 요청 기반 생성)는 제거되었고, 이미 생성된 리포트를 읽기만 하는 `GET /ai/report`로 대체되었습니다.
+- (자세한 내용은 [ai-report.md](./04_sequence/ai-report.md), [sensor.md](./01_Domain/sensor.md), [ai.md](./01_Domain/ai.md), [ai-api.md](./02_API/ai-api.md) 참고)
+
+### 21. "일일 피드백" 기능을 추가했다 (사용자가 환경을 수정하면 생육 변화를 매일 비교해 알려줌)
+
+사용자가 재배 환경(예: 온도)을 mushroom_reference 추천값과 다르게 임의로 수정했을 때, 그
+수정이 실제로 생육에 도움이 됐는지를 매일 확인해 알려주는 기능입니다. 주간 리포트와 마찬가지로
+Scheduler 기반(push)으로 만들기로 했습니다.
+
+- AI Service에 Daily Scheduler를 추가했습니다. 매일 재배별로 생육 분석 이력(`growth_record`)과 환경 변경 이력(Cultivation Service의 `environment_setting`)을 비교해 LLM으로 피드백을 생성하고, `daily_feedback`에 저장한 뒤 `DailyFeedbackCompletedEvent`를 발행합니다.
+- `growth_record` 테이블을 신설했습니다. 기존에는 생육 분석(Vision) 결과를 `ai:{cultivationId}:analysis` Redis 캐시(TTL 6시간)에만 저장해 하루만 지나도 이력이 사라졌는데, 일일 피드백이 여러 날짜의 추이를 비교하려면 영구 저장이 필요했기 때문입니다. Redis 캐시는 "빠른 재조회"용으로 그대로 유지됩니다.
+- 사용자가 전날 생육 사진을 찍지 않았다면 비교할 `growth_record`가 없으므로, 이 경우 LLM을 호출하지 않고 "전날 사진이 없어 피드백을 남길 수 없습니다"라는 고정 문구로 `daily_feedback` 행을 생성합니다(건너뛰지 않음 — "피드백 없음"과 "비교 데이터 없음"을 구분하기 위함).
+- 조회는 `GET /ai/feedback/daily`로 제공하며, 생성 자체는 API로 트리거하지 않습니다.
+- (자세한 내용은 [daily-feedback.md](./04_sequence/daily-feedback.md), [ai-db.md](./03_Database/ai-db.md), [ai.md](./01_Domain/ai.md), [ai-api.md](./02_API/ai-api.md) 참고)
+
+### 22. `environment_setting`을 "재배당 1행" 구조에서 "항목별 여러 행이 이력으로 쌓이는" 구조로 재설계했다
+
+결정 사항 21번(일일 피드백)을 구현하려면 "환경값을 언제 얼마나 바꿨는지"에 대한 이력이
+필요한데, 기존 `environment_setting`은 `cultivation_id UNIQUE`라 수정할 때마다 이전 값을
+덮어써 이력이 전혀 남지 않았습니다. 별도 `environment_setting_history` 테이블을 추가하는
+방안도 검토했지만, 테이블 자체를 항목별 행으로 바꾸고 UPDATE 대신 INSERT만 하도록 하면 테이블
+하나로 "현재값"과 "이력"을 동시에 표현할 수 있어 이 방식으로 확정했습니다.
+
+- 컬럼 구조가 `(temp_min, temp_max, humidity_min, humidity_max, co2_min, co2_max, light_min, light_max)` 8개에서 `(type, min, max, unit)`으로 바뀌었습니다. `type`은 `TEMPERATURE`/`HUMIDITY`/`CO2`/`LIGHT` 중 하나이며, 재배 하나당 항목별로 여러 행이 쌓입니다.
+- `min`/`max`는 `DECIMAL(4,1)`로 통일했습니다(기존에는 CO₂/조도가 `INT`). 하나의 컬럼을 모든 항목이 공유하는 구조라 온도의 소수점 정밀도를 살리는 쪽으로 맞췄고, CO₂/조도는 정수여도 그대로 저장됩니다.
+- `cultivation_id`의 `UNIQUE` 제약을 제거했습니다. `cultivation`과의 관계가 1:1에서 1:N으로 바뀌었습니다. "현재값"은 `(cultivation_id, type)` 기준 최신 행(`created_at DESC`)으로 조회합니다.
+- `PATCH /cultivations/{id}/environment`가 4개 필드를 모두 요구하지 않고 **부분 수정**(예: 온도만)을 지원하도록 바뀌었습니다. 수정한 항목만 새 행이 INSERT되고, 나머지 항목의 최신 행은 그대로 유지됩니다. `EnvironmentRangeUpdatedEvent`(Rule Engine Service의 Redis 캐시 갱신용)는 기존과 동일하게 4개 항목 전체를 담아 발행합니다(Rule Engine이 항상 4개 항목 전체를 알아야 하므로).
+- (자세한 내용은 [cultivation-db.md](./03_Database/cultivation-db.md), [cultivation-api.md](./02_API/cultivation-api.md), [cultivation.md](./01_Domain/cultivation.md), [daily-feedback.md](./04_sequence/daily-feedback.md) 참고)
 
 ---
 

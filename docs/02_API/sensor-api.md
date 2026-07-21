@@ -5,7 +5,10 @@
 Sensor Service에서 제공하는 REST API 명세입니다.
 
 Rule Engine Service로부터 RabbitMQ(EnvironmentMeasuredEvent)로 전달받아 저장한 센서 측정값을
-현재값/통계/차트/주간·월간 리포트 형태로 조회할 수 있습니다.
+현재값/통계/차트/주간 리포트 형태로 조회할 수 있습니다.
+
+> ℹ️ **변경 이력**: 월간 데이터 조회(`GET /report/monthly`)를 제거했습니다. 재배 기간이 한 달을
+> 넘지 않아 월간 리포트 자체가 의미가 없다고 판단했습니다.
 
 센서 "장치" 자체의 등록/조회/삭제는 Cultivation Service API(`/api/v1/cultivations/{id}/sensors`)를,
 MQTT 수신·규칙 평가·자동 제어는 Rule Engine Service(REST API 없음, rule-Engine.md 참고)를
@@ -141,7 +144,9 @@ metric (required) - temperature | humidity | co2 | light
 
 ## GET /report/weekly
 
-내부적으로 AI Service의 리포트 생성에 사용되는 집계 데이터를 반환합니다.
+내부적으로 AI Service의 리포트 생성에 사용되는 집계 데이터를 반환합니다. Weekly Scheduler가
+이 데이터를 AI Service에 전달(push)하는 것과 별개로, 필요 시 이 엔드포인트로 직접 조회할 수도
+있습니다.
 
 ### Query Parameter
 
@@ -166,20 +171,6 @@ cultivationId (required)
 
 ---
 
-# 월간 데이터 조회
-
-## GET /report/monthly
-
-### Query Parameter
-
-```
-cultivationId (required)
-```
-
-응답 구조는 주간 데이터 조회와 동일하며 집계 기간만 다릅니다.
-
----
-
 # Error Code
 
 | Code | Description |
@@ -198,7 +189,7 @@ cultivationId (required)
 호출받는 서비스
 
 ```
-AI Service (센서 데이터 조회, 주간/월간 데이터 조회)
+AI Service (센서 데이터 조회, 주간 데이터 조회)
 Cultivation Service (현재 센서 상태 조회, 환경 통계 조회)
 ```
 

@@ -68,12 +68,15 @@ Discord) 자체는 여전히 RabbitMQ 이벤트 기반 비동기 처리이며, D
 
 ### 목적
 
-AI 챗봇의 대화 이력(질문/답변)을 관리합니다. `ai:{hash}` Redis 캐시(동일 질문 재요청 시
-LLM 재호출 방지)와는 역할이 다릅니다 — 캐시는 성능 최적화용, 이 DB는 대화 이력 조회용입니다.
+AI 챗봇의 대화 이력(질문/답변), 생육 분석 이력, 일일 피드백 이력을 관리합니다. `ai:{hash}`/
+`ai:{cultivationId}:analysis` Redis 캐시(빠른 재조회/중복 호출 방지용)와는 역할이 다릅니다 —
+캐시는 성능 최적화용, 이 DB는 이력 조회용입니다.
 
 ### Table
 
-- chat_message
+- chat_message (챗봇 대화 이력)
+- growth_record (생육 분석 결과 이력 — Vision 분석할 때마다 한 행씩 쌓이며, "일일 피드백"의 생육 추이 비교에 사용)
+- daily_feedback (일일 피드백 이력 — Daily Scheduler가 매일 재배별로 생성)
 
 자세한 내용은 [ai-db.md](./ai-db.md) 참고.
 
@@ -137,10 +140,12 @@ TTL 6시간
 ### AI 리포트 Cache
 
 ```
-report:{cultivationId}:{period}
+report:{cultivationId}:weekly
 ```
 
-TTL 24시간
+TTL 24시간. Weekly Scheduler(Sensor Service)가 매주 먼저 집계 데이터를 전달하면 AI Service가
+리포트를 생성해 이 캐시를 채워둡니다(push). 재배 기간이 한 달을 넘지 않아 월간 리포트는
+만들지 않습니다.
 
 ---
 
@@ -299,7 +304,7 @@ Sensor Service
 
 ↓
 
-AI Service (주간/월간 리포트 요청 시 조회)
+AI Service (Weekly Scheduler가 주간 집계 데이터를 push로 전달, 사용자 요청 시점이 아님)
 
 ↓
 

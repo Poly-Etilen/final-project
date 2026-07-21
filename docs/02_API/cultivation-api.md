@@ -119,7 +119,22 @@ mushroom_reference의 짧은 참고 문구이며, 버섯 효능/재배 시 주�
 
 사용자가 추천값(mushroom_reference)을 참고하여 실제 자동 제어 기준값(위험 한계값)을 저장합니다.
 
+> ℹ️ **변경 이력**: `environment_setting`이 항목(TEMPERATURE/HUMIDITY/CO2/LIGHT)별 행 구조로
+> 재설계되면서, 이 API도 4개 필드를 모두 함께 보내지 않고 **일부 항목만 선택적으로 수정**할
+> 수 있도록 바뀌었습니다. 예를 들어 온도만 바꾸고 싶으면 `temperature`만 보내면 됩니다. 최소
+> 1개 이상의 필드는 있어야 합니다. (자세한 내용은
+> [cultivation-db.md](../03_Database/cultivation-db.md)의 `environment_setting` 참고)
+
 ### Request
+
+```json
+{
+    "temperature":22
+}
+```
+
+4개 필드(`temperature`/`humidity`/`co2`/`light`) 모두 선택 항목이며, 보낸 필드만 수정됩니다.
+물론 기존처럼 여러 필드를 한 번에 보낼 수도 있습니다.
 
 ```json
 {
@@ -140,8 +155,11 @@ mushroom_reference의 짧은 참고 문구이며, 버섯 효능/재배 시 주�
 }
 ```
 
-저장 시 단일 목표값을 허용 오차만큼 확장한 범위(min~max)로 변환해 저장하고,
-RabbitMQ로 EnvironmentRangeUpdatedEvent를 발행합니다. (Rule Engine Service의 Redis 캐시 갱신용)
+저장 시 보낸 필드마다 단일 목표값을 허용 오차만큼 확장한 범위(min~max)로 변환해 새 행을
+INSERT합니다(수정하지 않은 항목은 기존 최신 행이 그대로 유지됩니다). 이후 재배의 4개 항목
+전체(방금 수정한 것 + 기존 최신 값)를 모아 RabbitMQ로 `EnvironmentRangeUpdatedEvent`를
+발행합니다(Rule Engine Service의 Redis 캐시는 항상 4개 항목 전체를 갖고 있어야 하므로, 이
+이벤트 자체의 형태는 이전과 동일하게 4개 항목을 모두 담습니다).
 
 ---
 
@@ -448,6 +466,7 @@ place/location/deviceModel/status 등 상세 메타데이터는 포함하지 않
 | C005 | 지원하지 않는 버섯 종류 (mushroom_reference에 없음) |
 | C006 | 존재하지 않는 센서 |
 | C007 | 이미 등록된 device_eui (센서 등록 시 중복) |
+| C008 | 환경 설정 저장 시 필드를 하나도 보내지 않음 (temperature/humidity/co2/light 중 최소 1개 필요) |
 
 ---
 

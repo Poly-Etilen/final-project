@@ -14,6 +14,11 @@ Telegram/Discord)로 전송만 하고 기록을 남기지 않았습니다. 이 �
 > (자세한 내용은 [notification.md](../01_Domain/notification.md),
 > [notification-api.md](../02_API/notification-api.md) 참고)
 
+> ℹ️ **변경 이력**: `type` CHECK 제약에서 `MONTHLY_REPORT`를 제거하고 `DAILY_FEEDBACK`을
+> 추가했습니다. 재배 기간이 한 달을 넘지 않아 월간 리포트를 폐기했고, 대신 AI Service의
+> Daily Scheduler가 매일 발행하는 `DailyFeedbackCompletedEvent`를 새로 구독하게 되었습니다.
+> (자세한 내용은 [ai.md](../01_Domain/ai.md), [daily-feedback.md](../04_sequence/daily-feedback.md) 참고)
+
 ---
 
 # ERD
@@ -72,7 +77,7 @@ CREATE TABLE notification (
         'HARVEST_COMPLETED',
         'CULTIVATION_FINISHED',
         'WEEKLY_REPORT',
-        'MONTHLY_REPORT'
+        'DAILY_FEEDBACK'
     ))
 );
 ```

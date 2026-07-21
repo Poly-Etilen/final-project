@@ -408,7 +408,7 @@ FINISHED
 - 생육 점수, 균사 성장률, 갓 크기, 색상, 병충해 여부, 성장 단계는 Vision 모델이 산출한 결과이며 LLM이 추정하지 않습니다.
 - LLM은 계산된 지표를 해석하는 설명과 개선 방안 생성에만 사용합니다.
 - 사진은 카메라 센서가 아닌 사용자가 직접 촬영하여 업로드합니다.
-- 생육 분석 결과는 별도로 저장하지 않고 참고용으로만 제공하며, 업로드된 사진(photo)만 이력으로 보관합니다.
+- 생육 분석 결과는 `ai:{cultivationId}:analysis` Redis 캐시(TTL 6시간, 빠른 재조회용)뿐 아니라 `growth_record` 테이블(PostgreSQL, AI DB)에도 영구 저장됩니다. 업로드된 사진(photo)은 별도로 Cultivation DB에 이력으로 보관됩니다. (자세한 내용은 [growth-analysis.md](./growth-analysis.md) 참고)
 - 재배 종료와 수확 정보 저장은 하나의 API(PATCH /finish)로 함께 처리합니다.
 - 종료된 재배는 재배 이력(GET /cultivations/history)에서 조회할 수 있습니다.
 - Notification 전송 실패는 수확 처리 자체에 영향을 주지 않습니다.
