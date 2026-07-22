@@ -5,7 +5,7 @@
 InfluxDB는 버섯 재배 과정에서 발생하는 센서 데이터를 시계열(Time Series) 형태로 저장합니다.
 
 Rule Engine Service가 MQTT로 수신·검증한 데이터를 RabbitMQ(EnvironmentMeasuredEvent)로 전달하면,
-Sensor Service가 이를 구독하여 InfluxDB에 저장합니다.
+Cultivation Service가 이를 구독하여 InfluxDB에 저장합니다.
 대시보드 차트, 통계 조회, AI 분석 데이터 생성에 활용됩니다.
 
 센서가 1초 주기로 값을 보내더라도 InfluxDB에는 매초 기록하지 않고 **재배별로 10초 간격으로
@@ -20,8 +20,8 @@ Sensor Service가 이를 구독하여 InfluxDB에 저장합니다.
 
 | Service | 역할 |
 |----------|------|
-| Sensor Service | 센서 데이터 저장 및 조회 |
-| AI Service | 일간 환경 통계 분석 (Sensor Service의 집계 조회를 통해 간접적으로) |
+| Cultivation Service | 센서 데이터 저장 및 조회 |
+| AI Service | 일간 환경 통계 분석 (Cultivation Service의 집계 조회를 통해 간접적으로) |
 
 ---
 
@@ -111,7 +111,7 @@ RabbitMQ (EnvironmentMeasuredEvent, 매초 발행)
 
 ↓
 
-Sensor Service
+Cultivation Service
 
 ├── Redis 저장 (매초, 항상)
 └── InfluxDB 저장 (재배별 10초 이상 경과했을 때만 — 스로틀링)
@@ -238,7 +238,7 @@ InfluxDB 장애 발생 시
 - Redis는 현재 상태(Current State)를 관리하며 매초 갱신됩니다.
 - InfluxDB는 과거 이력(Historical Data)을 관리하며 10초 간격으로 스로틀링되어 기록됩니다.
 - 스로틀링 기준(10초)은 초기값이며 재배/센서 타입별로 조정될 수 있습니다.
-- 스로틀링은 Sensor Service가 재배별 마지막 기록 시각을 메모리에서 관리하며 적용합니다. (자세한 내용은 [sensor.md](../01_Domain/sensor.md) 참고)
+- 스로틀링은 Cultivation Service가 재배별 마지막 기록 시각을 메모리에서 관리하며 적용합니다. (자세한 내용은 [cultivation.md](../01_Domain/cultivation.md) 참고)
 
 ---
 

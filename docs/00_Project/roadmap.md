@@ -62,14 +62,14 @@
 
 ### 개발 대상
 
-8개 서비스(API Gateway 포함)로 구성합니다.
+7개 서비스(API Gateway 포함)로 구성합니다.
 
 - API Gateway
 - Auth Service
-- Cultivation Service
+- Cultivation Service (재배/수확/사진, 센서 장치/목표 환경/버섯 참조 데이터 관리,
+  측정값 저장/조회, 통계·차트, 일일 피드백용 일간 통계 집계, 문의(Inquiry))
 - AI Service
 - Rule Engine Service (MQTT 수신/Collector, 검증, 규칙 평가, 자동 제어, 센서 오류 감지)
-- Sensor Service (센서 장치/목표 환경/버섯 참조 데이터 관리, 측정값 저장/조회, 통계·차트, 일일 피드백용 일간 통계 집계)
 - Notification Service
 - DatasourceGenerator
 

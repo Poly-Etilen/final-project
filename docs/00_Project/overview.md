@@ -31,7 +31,7 @@
 ### 환경 추천
 
 사용자가 재배하려는 버섯을 선택하면 온도/습도/CO₂/조도의 최적 환경 범위를 공공데이터
-기반 참조 테이블(`mushroom_reference`, Sensor Service 소유)에서 조회해 추천한다.
+기반 참조 테이블(`mushroom_reference`, Cultivation Service 소유)에서 조회해 추천한다.
 버섯 종류가 5가지로 고정되어 있어 AI(Vector Search/LLM) 없이 직접 조회한다.
 
 ---

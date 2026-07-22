@@ -12,8 +12,8 @@
 이후 생육 점수가 개선되는 추세라면 이를 짚어줍니다.
 
 AI Service의 Daily Scheduler가 매일 재배별로 생육 분석 이력(`growth_record`)과 환경
-변경 이력(Sensor Service의 `environment_setting`), 그리고 지난 24시간 환경
-통계(Sensor Service의 InfluxDB 집계)를 모아 피드백을 생성합니다. push 모델이며,
+변경 이력(Cultivation Service의 `environment_setting`), 그리고 지난 24시간 환경
+통계(Cultivation Service의 InfluxDB 집계)를 모아 피드백을 생성합니다. push 모델이며,
 사용자가 생성을 요청하지 않습니다.
 
 전날 사용자가 생육 사진을 찍지 않았다면 비교할 `growth_record`가 없으므로, 그
@@ -37,8 +37,8 @@ RUNNING 상태 재배 순회
 ↓
 재배별로 growth_record 조회 (오늘 날짜 기준 존재 여부 + 최근 며칠 추이)
 ↓
-Sensor Service OpenFeign 호출 (environment_setting 최근 변경 이력)
-+ Sensor Service OpenFeign 호출 (최근 24시간 환경 통계: 평균/최고/최저 온도·습도·CO₂·조도)
+Cultivation Service OpenFeign 호출 (environment_setting 최근 변경 이력)
++ Cultivation Service OpenFeign 호출 (최근 24시간 환경 통계: 평균/최고/최저 온도·습도·CO₂·조도)
 ├── 오늘 growth_record 있음 → LLM 호출 (환경 변경/통계 vs 생육 추이 상관관계 해석)
 └── 오늘 growth_record 없음 → LLM 미호출, 생육 비교는 고정 안내 문구 사용 (환경 통계는 그대로 저장)
 ↓
@@ -74,8 +74,8 @@ LIMIT 7;
 
 ## 3. environment_setting 조회
 
-AI Service → OpenFeign → Sensor Service (`GET
-/api/v1/sensors/cultivations/{cultivationId}/environment-history`)
+AI Service → OpenFeign → Cultivation Service (`GET
+/api/v1/cultivations/{cultivationId}/environment-history`)
 
 ```json
 {
@@ -93,8 +93,8 @@ AI Service → OpenFeign → Sensor Service (`GET
 
 ## 4. 환경 통계 조회 (최근 24시간)
 
-AI Service → OpenFeign → Sensor Service (`GET
-/api/v1/sensors/cultivations/{cultivationId}/stats`, 최근 24시간 기준)
+AI Service → OpenFeign → Cultivation Service (`GET
+/api/v1/cultivations/{cultivationId}/stats`, 최근 24시간 기준)
 
 ```json
 {
@@ -107,7 +107,7 @@ AI Service → OpenFeign → Sensor Service (`GET
 }
 ```
 
-Sensor Service가 InfluxDB에서 최근 24시간 데이터를 집계해 반환합니다. 이 단계는
+Cultivation Service가 InfluxDB에서 최근 24시간 데이터를 집계해 반환합니다. 이 단계는
 `growth_record` 유무와 무관하게 항상 수행됩니다 — 생육 사진을 찍지 않은 날에도 환경
 통계는 조회/저장됩니다. 그날 측정값이 아직 하나도 없으면(예: 재배 생성 당일) 통계
 없이 `null`로 저장됩니다.
@@ -199,14 +199,14 @@ daily_feedback (AI DB)
 
 ## InfluxDB
 
-일일 환경 통계 조회 (Sensor Service 경유)
+일일 환경 통계 조회 (Cultivation Service 경유)
 
 ---
 
 # OpenFeign
 
 ```
-AI Service → Sensor Service (environment_setting 최근 변경 이력 조회, 최근 24시간 환경 통계 조회)
+AI Service → Cultivation Service (environment_setting 최근 변경 이력 조회, 최근 24시간 환경 통계 조회)
 ```
 
 ---
@@ -230,7 +230,7 @@ Notification Service
 # 예외 상황
 
 - Daily Scheduler 실행 실패 (해당 날짜는 `daily_feedback`이 생성되지 않음)
-- Sensor Service 호출 실패 (환경 변경 이력 또는 환경 통계 조회 실패 — 실패한 부분만
+- Cultivation Service 호출 실패 (환경 변경 이력 또는 환경 통계 조회 실패 — 실패한 부분만
   비워두고 나머지 정보만으로 피드백을 생성하거나, 해당 재배는 다음날 재시도)
 - LLM 응답 실패
 - `daily_feedback` 저장 실패
@@ -248,7 +248,7 @@ Notification Service
 - 환경 통계(평균/최고/최저)는 생육 데이터 유무와 독립적으로 매일 조회/저장됩니다.
   재배 기간이 한 달을 넘지 않는 도메인 특성상 별도의 주간/월간 리포트는 두지 않고,
   이 일일 피드백에 통합해 하루 단위로만 제공합니다.
-- 환경 통계는 Sensor Service에서만 계산합니다(InfluxDB 집계). AI Service는 그 값을
+- 환경 통계는 Cultivation Service에서만 계산합니다(InfluxDB 집계). AI Service는 그 값을
   받아 생육 추이와 함께 자연어로 해석하는 역할만 담당합니다.
 - Redis 캐시를 사용하지 않습니다. 하루에 한 번만 생성되고 바로 영구 저장되므로 별도
   캐시가 필요 없습니다.

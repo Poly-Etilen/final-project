@@ -4,8 +4,9 @@
 
 Auth Service는 사용자의 인증(Authentication)과 회원 프로필 관리를 담당하는 서비스입니다.
 이메일/비밀번호(LOCAL) 로그인과 구글 소셜 로그인(GOOGLE)을 모두 지원하며, JWT 발급/검증,
-이메일 인증, 회원 탈퇴, 휴면 계정 관리를 수행합니다. 역할 기반 접근 제어(관리자 전용 기능
-등)는 아직 구현되어 있지 않습니다.
+이메일 인증, 회원 탈퇴, 휴면 계정 관리를 수행합니다. `users.role`(USER/ADMIN)로 시스템
+관리자 여부를 구분하며, 이 값은 JWT 클레임에 담겨 다른 서비스가 관리자 전용 기능(예:
+Cultivation Service의 문의 답변/재배 삭제)을 인가할 때 사용합니다.
 
 ---
 
@@ -13,7 +14,7 @@ Auth Service는 사용자의 인증(Authentication)과 회원 프로필 관리�
 
 - 이메일/비밀번호 회원가입 및 이메일 인증
 - 이메일/비밀번호 로그인, 구글 소셜 로그인
-- JWT(Access/Refresh Token) 발급 및 검증
+- JWT(Access/Refresh Token) 발급 및 검증 (role 클레임 포함)
 - 회원 프로필 조회/수정
 - 회원 탈퇴 (Soft Delete)
 - 휴면 계정 전환 및 재활성화
@@ -131,7 +132,7 @@ Auth Service는 하나의 PostgreSQL Database를 사용합니다.
 
 ## Table
 
-- users (email/nickname UNIQUE, status ACTIVE/DORMANT/DELETED, deleted_at)
+- users (email/nickname UNIQUE, role USER/ADMIN, status ACTIVE/DORMANT/DELETED, deleted_at)
 - oauth_user (provider 정규화, UNIQUE(provider, provider_user_id))
 
 자세한 내용은 [auth-db.md](../03_Database/auth-db.md) 참고.
@@ -195,6 +196,7 @@ Auth Service는 하나의 PostgreSQL Database를 사용합니다.
 
 # 추후 개발 예정
 
-- 역할 기반 접근 제어(관리자 전용 기능)
 - 계정 연동 (같은 사용자에 LOCAL + GOOGLE 동시 연동 플로우)
 - 회원 탈퇴 취소(계정 복구)
+- 관리자 계정 최초 생성/부여 절차 확정 (현재는 `role = ADMIN` 부여 방식이 별도
+  문서화되어 있지 않음)

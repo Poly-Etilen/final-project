@@ -8,9 +8,9 @@
 
 | Database | 용도 | 사용 서비스 |
 |----------|------|------------|
-| PostgreSQL | 관계형 데이터 저장 | Auth, Cultivation, Sensor, Notification, AI |
-| Redis | 캐시 및 임시 데이터 | Auth, AI, Rule Engine, Sensor |
-| InfluxDB | 시계열 센서 데이터 | Sensor |
+| PostgreSQL | 관계형 데이터 저장 | Auth, Cultivation, Notification, AI |
+| Redis | 캐시 및 임시 데이터 | Auth, AI, Rule Engine, Cultivation |
+| InfluxDB | 시계열 센서 데이터 | Cultivation |
 | MinIO / 로컬 저장소 | 생육 사진(이미지) 저장 | Cultivation, AI |
 
 ---
@@ -32,32 +32,24 @@
 
 ## Cultivation DB
 
-버섯 재배 자체(생성/진행/종료, 수확 기록, 사진)를 관리합니다.
+버섯 재배 자체(생성/진행/종료, 수확 기록, 사진)와 센서 장치, 목표 환경(위험
+한계값) 이력, 버섯 참조 데이터, 문의(Inquiry)까지 함께 관리합니다(구 Sensor
+Service 통합).
 
 ### Table
 
-- cultivation (UNIQUE(user_id, name), status CREATED/RUNNING/FINISHED, mushroom_type은 Sensor DB `mushroom_reference`의 소프트 참조)
+- cultivation (UNIQUE(user_id, name), status CREATED/RUNNING/FINISHED, mushroom_type은 같은 DB의 `mushroom_reference`를 실제 FK로 참조)
 - harvest (cultivation당 여러 건, UNIQUE(cultivation_id, flush_no))
 - photo (object_key + storage_type으로 저장소 중립적 메타데이터 관리)
-
-자세한 내용은 [cultivation-db.md](./cultivation-db.md) 참고.
-
----
-
-## Sensor DB
-
-센서 장치, 목표 환경(위험 한계값) 이력, 버섯 참조 데이터를 관리합니다.
-
-### Table
-
 - measurement_type (온도/습도/CO2/조도 4종 참조 테이블 — 여러 테이블이 공유하는 항목 도메인을 한 곳에서 정의)
-- sensor (PK는 대리키 id, device_eui UNIQUE, is_deleted 소프트 삭제)
+- sensor (PK는 대리키 id, device_eui UNIQUE, is_deleted 소프트 삭제, cultivation_id는 실제 FK)
 - sensor_type (센서 1대가 여러 항목을 측정할 수 있는 1:N 하위 테이블, measurement_type FK)
-- environment_setting (재배별 목표 환경 이력, INSERT-only, measurement_type FK)
+- environment_setting (재배별 목표 환경 이력, INSERT-only, measurement_type FK, cultivation_id는 실제 FK)
 - mushroom_reference (버섯 5종 참조 데이터, mushroom_type 코드 UNIQUE, RAG용 텍스트 컬럼 포함)
 - mushroom_reference_threshold (버섯별 항목별 추천 범위, mushroom_reference/measurement_type FK)
+- inquiry (일반 문의/경작 문의, cultivation_id는 재배 삭제 후 기록 보존을 위해 의도적으로 소프트 참조)
 
-자세한 내용은 [sensor-db.md](./sensor-db.md) 참고.
+자세한 내용은 [cultivation-db.md](./cultivation-db.md) 참고.
 
 ---
 
@@ -94,7 +86,7 @@ AI 챗봇 대화 이력, 생육 분석 이력, 일일 피드백 이력, 인사�
 
 DatasourceGenerator는 별도의 PostgreSQL DB를 사용하지 않습니다. 센서 데이터 생성/발행에
 필요한 최소 정보(device_eui/cultivationId/sensorTypes)는 메모리(In-Memory)에서만 관리하며,
-Sensor Service가 발행하는 이벤트(평상시) + 서비스 시작 시 OpenFeign 전체 조회로 채워집니다.
+Cultivation Service가 발행하는 이벤트(평상시) + 서비스 시작 시 OpenFeign 전체 조회로 채워집니다.
 자세한 내용은 [datasource-generator-db.md](./datasource-generator-db.md) 참고.
 
 ---
@@ -110,7 +102,7 @@ Sensor Service가 발행하는 이벤트(평상시) + 서비스 시작 시 OpenF
 | AI: 버섯 가이드 캐시 | `ai:mushroom:{mushroomType}:guide` | 7일 |
 | AI: 인사이트 캐시 | `ai:{cultivationId}:insight` | 24시간 (사용자 요청 시 채워짐) |
 | Rule Engine: 목표 환경 범위 캐시 | `cultivation:{cultivationId}:range` | 24시간 (write-through) |
-| Sensor: 최신 센서 데이터 | `cultivation:{cultivationId}:current` | 없음 (매초 덮어씀) |
+| Cultivation: 최신 센서 데이터 | `cultivation:{cultivationId}:current` | 없음 (매초 덮어씀) |
 
 자세한 내용은 [redis.md](./redis.md) 참고.
 
@@ -136,7 +128,7 @@ environment
 - co2
 - light
 
-Sensor Service가 저장/조회를 전담합니다. 매초 들어오는 이벤트를 그대로 다 기록하지 않고,
+Cultivation Service가 저장/조회를 전담합니다. 매초 들어오는 이벤트를 그대로 다 기록하지 않고,
 재배별로 10초 간격으로 스로틀링하여 저장합니다. (자세한 내용은 [influxdb.md](./influxdb.md) 참고)
 
 ---
@@ -152,9 +144,11 @@ Sensor Service가 저장/조회를 전담합니다. 매초 들어오는 이벤�
 
 # 서비스 간 참조 원칙
 
-- **같은 DB 안**: 실제 FK를 겁니다. (예: `oauth_user.user_id → users.id`, `harvest.cultivation_id → cultivation.id`, `sensor_type.sensor_id → sensor.id`)
+- **같은 DB 안**: 실제 FK를 겁니다. (예: `oauth_user.user_id → users.id`, `harvest.cultivation_id → cultivation.id`, `sensor.cultivation_id → cultivation.id`, `cultivation.mushroom_type → mushroom_reference.mushroom_type`)
 - **다른 서비스의 DB**: FK 없는 순수 값(BIGINT/VARCHAR)으로만 참조하고, 존재/소유권 검증이
   필요하면 해당 서비스를 OpenFeign으로 호출해 확인합니다. (예: `cultivation.user_id`,
-  `sensor.cultivation_id`, `notification_endpoint.cultivation_id`)
+  `notification_endpoint.cultivation_id`)
+- **같은 DB인데도 예외적으로 소프트 참조**: `inquiry.cultivation_id`는 같은 Cultivation DB
+  안에 있지만, 재배 삭제 후에도 문의 기록을 보존해야 해서 의도적으로 FK를 걸지 않았습니다.
 - **삭제 전파**: 같은 DB라면 `ON DELETE CASCADE`로 자동 처리되지만, 다른 DB 간에는
   이벤트(`CultivationDeletedEvent` 등)를 구독해 보상 삭제합니다.

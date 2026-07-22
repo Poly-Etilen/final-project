@@ -26,10 +26,7 @@ Redis 조회
 ↓
 Cache Miss
 ↓
-Sensor Service — 현재 환경 / 통계 조회
-↓
-(재배가 지정된 경우) Cultivation Service — 버섯 종류 조회
-→ Sensor Service — mushroom_reference 정확 조회 (RAG 컨텍스트)
+Cultivation Service — 현재 환경 / 통계 / mushroom_reference 조회 (RAG 컨텍스트)
 ↓
 AI Service → LLM — 답변 생성
 ↓
@@ -69,13 +66,13 @@ Key: ai:{hash}
 
 ## 3. Cache Miss
 
-Redis에 없으면 Sensor Service를 OpenFeign으로 호출합니다.
+Redis에 없으면 Cultivation Service를 OpenFeign으로 호출합니다.
 
 ---
 
 ## 4. 센서 데이터 조회
 
-Sensor Service가 현재 환경(Redis)과 최근 통계(InfluxDB)를 조회합니다.
+Cultivation Service가 현재 환경(Redis)과 최근 통계(InfluxDB)를 조회합니다.
 
 조회 항목: 현재 온도/습도/CO₂/조도, 최근 7일 평균값, 목표 환경 대비 유지율
 
@@ -84,8 +81,8 @@ Sensor Service가 현재 환경(Redis)과 최근 통계(InfluxDB)를 조회합�
 ## 5. 버섯 참조 데이터 조회 (재배가 지정된 경우)
 
 `cultivationId`가 있으면 AI Service가 Cultivation Service에서 버섯 종류
-(`mushroomType`)를 조회하고, 이어서 Sensor Service에서 `mushroomType`으로 정확히
-일치하는 `mushroom_reference` 한 건을 조회해 특성/효능/재배 가이드 텍스트를 LLM
+(`mushroomType`)를 조회하고, 이어서 같은 서비스의 `mushroom_reference`에서
+`mushroomType`으로 정확히 일치하는 한 건을 조회해 특성/효능/재배 가이드 텍스트를 LLM
 컨텍스트로 사용합니다. 버섯 종류가 5종 고정이라 항상 정확히 한 건만 조회하면
 되므로, 별도의 유사도 검색 없이 직접 조회로 충분합니다. `cultivationId`가 없는
 일반 질문(예: 단순 인사)은 이 단계를 건너뜁니다.
@@ -143,7 +140,7 @@ Notification Service OpenFeign 호출 (발신자 Chat ID로 등록된 notificati
 ├── 매칭 없음 → "먼저 이 채널을 재배에 등록해주세요" 고정 안내 문구 응답 (LLM 미호출)
 └── 매칭 있음 → cultivationId 확인, chat_log 저장 (senderRole=USER, cultivationId=조회된 값, userId=NULL)
 ↓
-Redis 조회 (ai:{hash}) → Cache Miss 시 Sensor Service 조회 (현재 환경/통계) + LLM 호출
+Redis 조회 (ai:{hash}) → Cache Miss 시 Cultivation Service 조회 (현재 환경/통계) + LLM 호출
 ↓
 chat_log 저장 (senderRole=BOT, 같은 cultivationId)
 ↓
@@ -151,7 +148,7 @@ Telegram Bot API / Discord Webhook으로 응답 전송
 ```
 
 `notification_endpoint`가 재배 단위로 등록되므로, Telegram/Discord 챗봇도 항상 특정
-`cultivationId` 맥락에서 답변합니다(Sensor Service 조회 등 APP 채널과 동일한 흐름
+`cultivationId` 맥락에서 답변합니다(Cultivation Service 조회 등 APP 채널과 동일한 흐름
 수행). 다만 이 경로로는 개별 사용자를 특정할 수 없어 `chat_log.user_id`는 NULL로
 저장됩니다. Notification Service를 호출하는 이유는 이미 알림 채널 등록용으로 저장된
 `notification_endpoint`를 챗봇 발신자 식별에도 재사용하기 위해서이며, 별도의
@@ -173,15 +170,14 @@ AI 응답 캐시
 
 ## InfluxDB
 
-센서 통계 조회 (Sensor Service 경유)
+센서 통계 조회 (Cultivation Service 경유)
 
 ---
 
 # OpenFeign
 
 ```
-AI Service → Sensor Service (현재 환경/통계 조회, mushroom_reference 조회)
-AI Service → Cultivation Service (재배가 지정된 경우 버섯 종류 조회)
+AI Service → Cultivation Service (현재 환경/통계 조회, 버섯 종류 조회, mushroom_reference 조회)
 AI Service → Notification Service (Telegram/Discord 웹훅 수신 시, 발신자 → cultivationId 조회)
 ```
 
@@ -195,7 +191,7 @@ AI Service → Notification Service (Telegram/Discord 웹훅 수신 시, 발신�
 
 # 예외 상황
 
-- Redis 장애 / Sensor Service 호출 실패 / Cultivation Service 호출 실패
+- Redis 장애 / Cultivation Service 호출 실패
 - LLM 응답 실패
 - `chat_log` 저장 실패 (저장에 실패해도 챗봇 응답 자체는 반환)
 - Telegram/Discord 웹훅으로 메시지가 왔지만 등록된 `notification_endpoint`가 없는 경우

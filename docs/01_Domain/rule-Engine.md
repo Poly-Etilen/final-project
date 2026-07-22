@@ -4,7 +4,7 @@
 
 Rule Engine Service는 MQTT로 수신한 센서 데이터를 검증하고, 목표 환경 범위를 기준으로
 자동 제어를 판단하는 서비스입니다. 별도의 영구 저장소 없이 Redis 캐시만 사용하며, 측정값
-자체의 저장/조회는 Sensor Service가 담당합니다.
+자체의 저장/조회는 Cultivation Service가 담당합니다.
 
 ---
 
@@ -22,7 +22,7 @@ Rule Engine Service는 MQTT로 수신한 센서 데이터를 검증하고, 목�
 ## 측정값 수신 및 검증
 
 DatasourceGenerator가 MQTT로 발행한 값을 1초 주기로 수신해 유효 범위를 검증합니다.
-검증 후 RabbitMQ로 `EnvironmentMeasuredEvent`를 발행해 Sensor Service에 전달합니다.
+검증 후 RabbitMQ로 `EnvironmentMeasuredEvent`를 발행해 Cultivation Service에 전달합니다.
 
 ---
 
@@ -31,14 +31,14 @@ DatasourceGenerator가 MQTT로 발행한 값을 1초 주기로 수신해 유효 
 Redis에 캐싱된 목표 환경 범위(min~max)와 현재 측정값을 비교해 장치를 제어합니다. 제어를
 **시작**하는 기준은 범위 경계(min/max)이고, 제어를 **멈추는** 기준은 범위의 중앙값
 (mid = (min+max)/2)입니다 — 경계 부근에서 값이 미세하게 오르내려도 반복 On/Off가
-발생하지 않도록 하기 위함입니다. 캐시가 없을 때만 Sensor Service를 OpenFeign으로 호출해
+발생하지 않도록 하기 위함입니다. 캐시가 없을 때만 Cultivation Service를 OpenFeign으로 호출해
 값을 채웁니다.
 
 ---
 
 ## 센서 오류 감지
 
-일정 시간 동안 값이 들어오지 않으면 `SensorErrorEvent`를 발행해 Sensor Service(센서
+일정 시간 동안 값이 들어오지 않으면 `SensorErrorEvent`를 발행해 Cultivation Service(센서
 상태 갱신)와 Notification Service(알림)에 전달합니다.
 
 ---
@@ -65,7 +65,7 @@ MQTT/RabbitMQ 기반으로만 동작하며 REST API는 제공하지 않습니다
 
 ## 호출하는 서비스
 
-### Sensor Service
+### Cultivation Service
 
 - 목표 환경 범위 캐시 미스 시 fallback 조회
 
@@ -85,11 +85,11 @@ MQTT/RabbitMQ 기반으로만 동작하며 REST API는 제공하지 않습니다
 
 ### EnvironmentMeasuredEvent
 
-Sensor Service가 구독해 저장합니다.
+Cultivation Service가 구독해 저장합니다.
 
 ### SensorErrorEvent
 
-Sensor Service(상태 갱신), Notification Service(알림)가 구독합니다.
+Cultivation Service(상태 갱신), Notification Service(알림)가 구독합니다.
 
 ---
 
@@ -97,7 +97,7 @@ Sensor Service(상태 갱신), Notification Service(알림)가 구독합니다.
 
 ### EnvironmentRangeUpdatedEvent
 
-Sensor Service가 발행. 목표 환경 범위 캐시를 write-through로 갱신합니다.
+Cultivation Service가 발행. 목표 환경 범위 캐시를 write-through로 갱신합니다.
 
 ---
 
@@ -112,7 +112,7 @@ Sensor Service가 발행. 목표 환경 범위 캐시를 write-through로 갱신
 # 예외 상황
 
 - MQTT 연결 끊김
-- Redis 캐시 미스 + Sensor Service 호출 실패
+- Redis 캐시 미스 + Cultivation Service 호출 실패
 - 유효 범위를 벗어난 이상값 수신
 
 ---

@@ -17,7 +17,7 @@ Redis는 실시간 데이터와 임시 데이터를 저장하기 위해 사용�
 | Auth Service | 이메일 인증 |
 | AI Service | AI 응답 캐시 |
 | Rule Engine Service | 목표 환경 범위 캐시 |
-| Sensor Service | 최신 센서 데이터 |
+| Cultivation Service | 최신 센서 데이터 |
 
 ---
 
@@ -244,7 +244,7 @@ TTL
 
 ## 목표 환경 범위 캐시
 
-규칙 평가 시마다 Sensor Service를 호출하지 않도록,
+규칙 평가 시마다 Cultivation Service를 호출하지 않도록,
 목표 환경 범위(min~max)를 캐싱해 둡니다.
 
 Key
@@ -281,9 +281,9 @@ TTL
 24시간
 ```
 
-Sensor Service가 environment_setting을 생성/수정할 때 발행하는 EnvironmentRangeUpdatedEvent를
+Cultivation Service가 environment_setting을 생성/수정할 때 발행하는 EnvironmentRangeUpdatedEvent를
 구독해 값을 갱신하며, 이때 TTL도 24시간으로 다시 연장합니다(write-through). 캐시가 없을 때만
-Sensor Service를 OpenFeign으로 호출해 값을 채워 넣습니다.
+Cultivation Service를 OpenFeign으로 호출해 값을 채워 넣습니다.
 
 ---
 
@@ -324,10 +324,10 @@ TTL
 없음
 ```
 
-최신 데이터가 들어올 때마다(매초) 덮어씁니다. Sensor Service는 EnvironmentMeasuredEvent를 받을 때마다
+최신 데이터가 들어올 때마다(매초) 덮어씁니다. Cultivation Service는 EnvironmentMeasuredEvent를 받을 때마다
 Redis는 항상 갱신하지만, InfluxDB는 재배별 10초 간격으로 스로틀링하여 저장합니다. Redis는 값 1건만
 유지하는 덮어쓰기 구조라 매초 갱신해도 저장 용량에는 영향이 없습니다. (자세한 내용은
-[influxdb.md](./influxdb.md), [sensor.md](../01_Domain/sensor.md) 참고)
+[influxdb.md](./influxdb.md), [cultivation.md](../01_Domain/cultivation.md) 참고)
 
 ---
 
@@ -365,7 +365,7 @@ Redis는 항상 갱신하지만, InfluxDB는 재배별 10초 간격으로 스로
 
 ---
 
-## Sensor Service
+## Cultivation Service
 
 저장 데이터
 
@@ -457,7 +457,7 @@ RabbitMQ (EnvironmentMeasuredEvent, 매초 발행)
 
 ↓
 
-Sensor Service
+Cultivation Service
 
 ↓
 
@@ -493,7 +493,7 @@ Redis 조회
 
 ↓
 
-Cultivation Service OpenFeign 호출 (버섯 종류 조회) + Sensor Service OpenFeign 호출 (환경 평균 조회)
+Cultivation Service OpenFeign 호출 (버섯 종류 + 환경 평균 조회)
 
 ↓
 
@@ -510,7 +510,7 @@ AI DB insight 테이블 검색 (mushroom_type 정확히 일치 + avg_temperature
 ## Rule Engine Range Cache
 
 ```
-Sensor Service
+Cultivation Service
 
 ↓
 
@@ -538,7 +538,7 @@ Rule Engine Service
 
 ↓
 
-Sensor Service OpenFeign 호출 (fallback)
+Cultivation Service OpenFeign 호출 (fallback)
 
 ↓
 
@@ -586,8 +586,8 @@ Redis 장애 발생 시
 
 ## Rule Engine
 
-- 캐시 미스 상태와 동일하게 동작 (매번 Sensor Service OpenFeign 호출)
-- Sensor Service에 순간적으로 트래픽이 몰릴 수 있음
+- 캐시 미스 상태와 동일하게 동작 (매번 Cultivation Service OpenFeign 호출)
+- Cultivation Service에 순간적으로 트래픽이 몰릴 수 있음
 - 자동 제어 판단 자체는 계속 동작하지만 응답 지연이 늘어날 수 있음
 
 ---

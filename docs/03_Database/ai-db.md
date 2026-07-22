@@ -151,7 +151,7 @@ Daily Scheduler가 매일 재배별로 생성하는 일일 피드백 결과입�
 | created_at | DATETIME | X | 생성 시각 |
 
 `has_growth_data`가 false이면 `content`의 생육 비교 부분에는 고정 안내 문구가
-들어갑니다. 환경 통계 컬럼들은 `has_growth_data`와 무관하게 Sensor Service의
+들어갑니다. 환경 통계 컬럼들은 `has_growth_data`와 무관하게 Cultivation Service의
 InfluxDB 집계 조회 결과로 매일 채워지며, 그날 측정값이 전혀 없었던 경우(예: 재배
 생성 당일)에만 NULL로 남습니다. `UNIQUE(cultivation_id, feedback_date)`로 하루에
 한 번만 생성되도록 합니다.

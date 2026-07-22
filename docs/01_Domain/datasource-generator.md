@@ -25,8 +25,8 @@ DatasourceGenerator는 센서 데이터를 MQTT Broker로 발행(Publish)하는 
 
 ## 센서 캐시 관리
 
-Sensor Service가 발행하는 `SensorRegisteredEvent`/`SensorDeletedEvent`를 구독해
-`sensor_cache`를 갱신합니다. 서비스 재시작 시에는 Sensor Service의 내부용 전체 목록 조회
+Cultivation Service가 발행하는 `SensorRegisteredEvent`/`SensorDeletedEvent`를 구독해
+`sensor_cache`를 갱신합니다. 서비스 재시작 시에는 Cultivation Service의 내부용 전체 목록 조회
 API를 OpenFeign으로 호출해 캐시를 일괄 재구성합니다.
 
 ---
@@ -48,9 +48,9 @@ REST API를 제공하지 않습니다 (MQTT Publish + RabbitMQ Subscribe만 수�
 
 ## 호출하는 서비스
 
-### Sensor Service
+### Cultivation Service
 
-- 서비스 시작 시 전체 센서 목록 조회 (`GET /api/v1/sensors`, 내부용)
+- 서비스 시작 시 전체 센서 목록 조회 (`GET /api/v1/cultivations/sensors`, 내부용)
 
 ---
 
@@ -60,7 +60,7 @@ REST API를 제공하지 않습니다 (MQTT Publish + RabbitMQ Subscribe만 수�
 
 ### SensorRegisteredEvent / SensorDeletedEvent
 
-Sensor Service가 발행. `sensor_cache`를 갱신합니다.
+Cultivation Service가 발행. `sensor_cache`를 갱신합니다.
 
 ---
 
@@ -73,7 +73,7 @@ Sensor Service가 발행. `sensor_cache`를 갱신합니다.
 # 예외 상황
 
 - MQTT Broker 연결 실패
-- 서비스 재시작 시 Sensor Service 전체 조회 실패 (캐시가 비어 발행이 지연될 수 있음)
+- 서비스 재시작 시 Cultivation Service 전체 조회 실패 (캐시가 비어 발행이 지연될 수 있음)
 
 ---
 

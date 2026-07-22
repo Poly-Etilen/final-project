@@ -19,15 +19,14 @@ Spring MVC / Spring Security / Spring Data JPA / Spring AI는 별도 버전을 �
 ### PostgreSQL (서비스별 전용 DB)
 
 - 사용자/인증 정보 (Auth DB)
-- 재배/수확/사진 정보 (Cultivation DB)
-- 센서 장치/목표 환경/버섯 참조 정보 (Sensor DB)
+- 재배/수확/사진, 센서 장치/목표 환경/버섯 참조 정보, 문의(Inquiry) (Cultivation DB)
 - 알림 이력 (Notification DB)
 - 챗봇 대화/생육 분석/일일 피드백/인사이트 이력 (AI DB)
 
 ### Redis
 
 - Refresh Token / 이메일 인증
-- AI 응답·생육 분석·리포트·인사이트·버섯 가이드 캐시
+- AI 응답·생육 분석·인사이트·버섯 가이드 캐시
 - 목표 환경 범위 캐시
 - 최신 센서 데이터
 

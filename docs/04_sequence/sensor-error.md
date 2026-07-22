@@ -28,7 +28,7 @@ Rule Engine Service
 RabbitMQ
 ↓
 SensorErrorEvent 발행
-├── Sensor Service → sensor.status 갱신
+├── Cultivation Service → sensor.status 갱신
 └── Notification Service
 ↓
 Telegram / Discord
@@ -91,7 +91,7 @@ Rule Engine Service가 센서 상태를 `OFFLINE` 또는 `ERROR`로 결정합니
 
 ---
 
-## 6. Sensor Service 처리
+## 6. Cultivation Service 처리
 
 RabbitMQ Subscribe → `sensor` 테이블의 `status` 컬럼을 갱신합니다.
 
@@ -117,7 +117,7 @@ ONLINE → OFFLINE
 ## PostgreSQL
 
 ```
-sensor (Sensor DB)
+sensor (Cultivation DB)
 ```
 
 ---
@@ -145,7 +145,7 @@ SensorErrorEvent
 Subscribe
 
 ```
-Sensor Service
+Cultivation Service
 Notification Service
 ```
 
@@ -160,7 +160,7 @@ Notification Service
 # 예외 상황
 
 - MQTT Broker 연결 자체 장애 (전체 센서 감지 불가)
-- RabbitMQ 발행 실패 / Sensor Service 상태 갱신 실패
+- RabbitMQ 발행 실패 / Cultivation Service 상태 갱신 실패
 - Notification 전송 실패
 - 일시적 지연으로 인한 오탐(False Positive)
 
@@ -170,7 +170,7 @@ Notification Service
 
 - Rule Engine Service는 센서별 마지막 수신 시각을 메모리 또는 캐시에서 관리합니다.
 - 수신 주기 기준(60초)은 센서 타입에 따라 다르게 설정할 수 있습니다.
-- 센서 오류 상태는 Sensor DB의 `sensor.status`에서만 관리하며 InfluxDB에는 기록하지
+- 센서 오류 상태는 Cultivation DB의 `sensor.status`에서만 관리하며 InfluxDB에는 기록하지
   않습니다. DatasourceGenerator는 이 상태를 알 필요가 없으며 `sensor_cache`에도 상태
   컬럼을 두지 않습니다.
 - 센서가 다시 정상 데이터를 전송하면 상태를 `ONLINE`으로 복구합니다

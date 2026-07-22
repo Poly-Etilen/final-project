@@ -2,24 +2,29 @@
 
 ## 서비스 구성
 
-8개 서비스(API Gateway 포함)로 구성합니다.
+7개 서비스(API Gateway 포함)로 구성합니다.
 
 - API Gateway
 - Auth Service (인증/회원 프로필/탈퇴)
-- Cultivation Service (재배/수확/사진)
+- Cultivation Service (재배/수확/사진, 센서 장치/목표 환경/버섯 참조 데이터 관리,
+  측정값 저장/조회, 통계·차트, 일일 피드백용 일간 통계 집계, 문의(Inquiry))
 - AI Service (챗봇/생육 분석/일일 피드백/인사이트/버섯 가이드)
 - Rule Engine Service (MQTT 수신/Collector, 검증, 규칙 평가, 자동 제어, 센서 오류 감지)
-- Sensor Service (센서 장치/목표 환경/버섯 참조 데이터 관리, 측정값 저장/조회, 통계·차트, 일일 피드백용 일간 통계 집계)
 - Notification Service
 - DatasourceGenerator
+
+원래는 Cultivation Service와 Sensor Service로 나뉘어 있었으나, 두 서비스가 항상 같이
+바뀌고 트랜잭션 경계가 자주 걸쳐 있어 Cultivation Service로 통합했습니다. 시스템
+관리자를 제외한 모든 역할이 문의를 남기고 관리자가 답변/처리하는 문의(Inquiry)
+기능도 이 서비스에 둡니다.
 
 버섯 종류가 5종 고정이고, 인사이트 검색도 정확한 값/범위 필터로 충분해 별도의
 Embedding Service나 벡터 검색 인프라(Elasticsearch)는 두지 않습니다. 관련 조회는
 모두 PostgreSQL에 대한 직접 쿼리(OpenFeign 또는 자체 DB 조회)로 처리합니다.
 
-Rule Engine Service와 Sensor Service는 기본적으로 RabbitMQ(`EnvironmentMeasuredEvent`)로
+Rule Engine Service와 Cultivation Service는 기본적으로 RabbitMQ(`EnvironmentMeasuredEvent`)로
 연결됩니다. 단, 목표 환경 범위(`environment_setting`) Redis 캐시가 없을 때(TTL 만료,
-재시작 직후 등)에만 Rule Engine Service가 Sensor Service를 OpenFeign으로 예외적으로
+재시작 직후 등)에만 Rule Engine Service가 Cultivation Service를 OpenFeign으로 예외적으로
 호출하는 fallback이 있습니다.
 
 ---
@@ -29,9 +34,9 @@ Rule Engine Service와 Sensor Service는 기본적으로 RabbitMQ(`EnvironmentMe
 ### PostgreSQL (서비스별 전용 DB)
 
 - Auth DB — `users`, `oauth_user`
-- Cultivation DB — `cultivation`, `harvest`, `photo`
-- Sensor DB — `measurement_type`, `sensor`, `sensor_type`, `environment_setting`,
-  `mushroom_reference`, `mushroom_reference_threshold`
+- Cultivation DB — `cultivation`, `harvest`, `photo`, `measurement_type`, `sensor`,
+  `sensor_type`, `environment_setting`, `mushroom_reference`,
+  `mushroom_reference_threshold`, `inquiry`
 - Notification DB — `notification_event`, `notification_delivery`, `notification_endpoint`
 - AI DB — `chat_log`, `growth_record`, `daily_feedback`, `insight`
 
@@ -45,7 +50,7 @@ Rule Engine Service와 Sensor Service는 기본적으로 RabbitMQ(`EnvironmentMe
 - Refresh Token / 이메일 인증번호 (Auth Service)
 - AI 응답·생육 분석·인사이트·버섯 가이드 캐시 (AI Service)
 - 목표 환경 범위 캐시 (Rule Engine Service)
-- 최신 센서 데이터 (Sensor Service)
+- 최신 센서 데이터 (Cultivation Service)
 
 ---
 
@@ -80,12 +85,12 @@ Rule Engine Service와 Sensor Service는 기본적으로 RabbitMQ(`EnvironmentMe
 
 ## AI
 
-### 환경 추천 (Cultivation/Sensor Service, AI 미사용)
+### 환경 추천 (Cultivation Service, AI 미사용)
 
 ```
 Cultivation Service
 ↓
-Sensor Service에 OpenFeign 호출 → mushroom_reference 조회 (PostgreSQL)
+mushroom_reference 조회 (같은 DB, 내부 조회)
 ↓
 환경 추천
 ```
@@ -100,7 +105,7 @@ Sensor Service에 OpenFeign 호출 → mushroom_reference 조회 (PostgreSQL)
 ```
 Spring AI
 ↓
-Sensor Service에서 mushroom_reference 직접 조회 (mushroomType 정확히 일치, RAG 컨텍스트)
+Cultivation Service에서 mushroom_reference 직접 조회 (mushroomType 정확히 일치, RAG 컨텍스트)
 ↓
 LLM
 ↓
@@ -135,7 +140,7 @@ growth_record 영구 저장 (AI DB)
 Daily Scheduler (AI Service, 매일 23시)
 ↓
 growth_record(생육 추이) + environment_setting(환경 변경 이력) + 일간 환경 통계
-(Sensor Service, InfluxDB 최근 24시간 집계) 조회
+(Cultivation Service, InfluxDB 최근 24시간 집계) 조회
 ↓
 LLM 해석 (사진 없으면 생육 비교만 고정 문구, 환경 통계는 그대로 반영)
 ↓

@@ -5,7 +5,7 @@
 ### 설명
 
 사용자가 재배하고자 하는 버섯의 종류를 입력하면 공공데이터 기반 참조
-테이블(`mushroom_reference`, Sensor Service 소유)에서 해당 종의 최적 환경 범위를
+테이블(`mushroom_reference`, Cultivation Service 소유)에서 해당 종의 최적 환경 범위를
 조회해 추천합니다. 버섯 종류가 5가지로 고정되어 있어 항상 동일한 값이 나오므로,
 Vector Search나 LLM 없이 직접 조회합니다.
 
@@ -19,11 +19,10 @@ Vector Search나 LLM 없이 직접 조회합니다.
 ### 동작 과정
 
 1. 사용자가 재배할 버섯을 선택합니다.
-2. Cultivation Service가 Sensor Service를 OpenFeign으로 호출해
-   `mushroom_reference`를 조회합니다.
+2. Cultivation Service가 같은 DB의 `mushroom_reference`를 내부 조회합니다.
 3. 조회된 최적 범위를 추천값으로 반환합니다.
 4. 사용자는 추천 범위를 참고해 자동 제어 기준값(위험 한계값)을 직접 입력합니다.
-5. 저장 시 Sensor Service가 단일 목표값을 허용 오차만큼 확장한 범위로 변환해
+5. 저장 시 Cultivation Service가 단일 목표값을 허용 오차만큼 확장한 범위로 변환해
    저장합니다.
 
 ---
@@ -258,3 +257,28 @@ Vision 모델은 사전에 학습된 성장 단계별 이미지 패턴과 업로
 탈퇴 즉시 개인정보를 완전히 삭제하지 않고 Soft Delete로 처리합니다. 사용자 행
 자체는 삭제하지 않으며, 후속 처리(재배 비활성화)는 `UserDeletedEvent` 기반으로
 비동기 처리됩니다.
+
+---
+
+## 14. 문의(Inquiry)
+
+### 설명
+
+시스템 관리자를 제외한 모든 역할이 문의를 남길 수 있고, 시스템 관리자가 답변하거나
+처리합니다. 문의 유형은 일반 문의와 경작 문의 두 가지입니다.
+
+### 유형별 처리
+
+- 일반 문의(GENERAL): 관리자가 텍스트 답변을 남기면 상태가 `OPEN → ANSWERED`로
+  바뀝니다.
+- 경작 문의(CULTIVATION): `cultivationId`로 특정 재배를 지정합니다. 관리자는 텍스트
+  답변 대신, 문제가 된 재배 자체를 조회 후 삭제할 수 있습니다(예: 재배 중 오류가
+  발생해 삭제하고 다시 생성해야 하는 경우). 삭제가 이루어지면 상태가
+  `OPEN → CLOSED`로 바뀝니다.
+
+### 특징
+
+Cultivation Service의 `inquiry` 테이블에 저장됩니다. 경작 문의의 `cultivation_id`는
+같은 DB에 있음에도 의도적으로 FK를 걸지 않은 소프트 참조입니다 — 재배가 삭제된
+이후에도 "어떤 재배에 대한 문의였는지" 이력을 남기기 위해서입니다. 관리자 여부는
+Auth DB의 `users.role`(USER/ADMIN)을 JWT 클레임으로 확인합니다.

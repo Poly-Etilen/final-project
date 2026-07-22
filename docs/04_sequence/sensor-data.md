@@ -5,11 +5,11 @@
 센서에서 생성된 환경 데이터를 실시간으로 수집하고 저장하는 과정입니다.
 
 Rule Engine Service가 MQTT 수신과 검증을 담당하고, RabbitMQ(`EnvironmentMeasuredEvent`)로
-전달하면 Sensor Service가 이를 구독해 Redis(현재 상태)/InfluxDB(시계열 데이터)에
+전달하면 Cultivation Service가 이를 구독해 Redis(현재 상태)/InfluxDB(시계열 데이터)에
 저장합니다.
 
 센서는 1초 주기로 값을 보내며, `EnvironmentMeasuredEvent`도 매초 발행됩니다. 다만
-Sensor Service는 Redis와 InfluxDB를 다른 주기로 처리합니다 — **Redis는 매초 그대로
+Cultivation Service는 Redis와 InfluxDB를 다른 주기로 처리합니다 — **Redis는 매초 그대로
 갱신**하고, **InfluxDB는 재배별로 10초 이상 지났을 때만 기록**합니다. 재배실 환경은
 물리적으로 초 단위로 급변하지 않으므로 10초 해상도로도 이력 데이터 품질에 문제가 없으며,
 InfluxDB 저장 용량을 약 1/10로 줄일 수 있습니다. 대시보드가 보여주는 "현재값"은 Redis
@@ -34,7 +34,7 @@ Rule Engine Service
 ↓
 RabbitMQ (EnvironmentMeasuredEvent, 매초 발행)
 ↓
-Sensor Service
+Cultivation Service
 ├── Redis 저장 (매초, 항상)
 └── InfluxDB 저장 (재배별 10초 이상 경과했을 때만)
 ↓
@@ -92,7 +92,7 @@ MQTT Topic을 Subscribe해 수신 주기와 값 범위를 검증합니다.
 
 ---
 
-## 5. Sensor Service 저장
+## 5. Cultivation Service 저장
 
 RabbitMQ Subscribe → 이벤트를 받을 때마다 Redis는 항상 저장하고, InfluxDB는 스로틀링
 여부를 판단합니다.
@@ -144,13 +144,13 @@ Timestamp: 2026-08-15T12:30:00Z
 
 ## 8. Dashboard 조회 (현재값)
 
-Sensor Service → Redis 조회 → 현재 환경 반환
+Cultivation Service → Redis 조회 → 현재 환경 반환
 
 ---
 
 ## 9. 차트 조회 (이력)
 
-Sensor Service → InfluxDB 조회 → 차트 데이터 반환
+Cultivation Service → InfluxDB 조회 → 차트 데이터 반환
 
 ---
 
@@ -158,11 +158,11 @@ Sensor Service → InfluxDB 조회 → 차트 데이터 반환
 
 ## Redis
 
-최신 환경 데이터 저장 (Sensor Service, 매초 갱신)
+최신 환경 데이터 저장 (Cultivation Service, 매초 갱신)
 
 ## InfluxDB
 
-센서 이력 저장 (Sensor Service, 재배별 10초 간격 스로틀링)
+센서 이력 저장 (Cultivation Service, 재배별 10초 간격 스로틀링)
 
 ---
 
@@ -189,10 +189,10 @@ EnvironmentMeasuredEvent
 Subscribe
 
 ```
-Sensor Service
+Cultivation Service
 ```
 
-Rule Engine Service(검증)와 Sensor Service(저장)는 RabbitMQ로만 연결되며 서로 직접
+Rule Engine Service(검증)와 Cultivation Service(저장)는 RabbitMQ로만 연결되며 서로 직접
 호출하지 않습니다.
 
 ---
@@ -244,5 +244,5 @@ Rule Engine Service(검증)와 Sensor Service(저장)는 RabbitMQ로만 연결�
 - Dashboard는 현재 상태와 이력을 각각 다른 저장소에서 조회하며, 조회 창구는 Sensor
   Service입니다.
 - AI 분석은 Redis가 아닌 InfluxDB 데이터를 기반으로 수행합니다.
-- Rule Engine Service(검증·규칙평가)와 Sensor Service(저장·조회)는 서로 다른 서비스이며
+- Rule Engine Service(검증·규칙평가)와 Cultivation Service(저장·조회)는 서로 다른 서비스이며
   RabbitMQ로만 연결됩니다.

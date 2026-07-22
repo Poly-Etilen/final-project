@@ -21,6 +21,7 @@ users
 PK  id
     email            (UNIQUE)
     password         (nullable)
+    role
     status
     email_verified
     nickname         (UNIQUE)
@@ -56,6 +57,7 @@ FK  user_id
 | id | BIGSERIAL | X | PK |
 | email | VARCHAR(255) | X | 이메일, UNIQUE |
 | password | VARCHAR(255) | O | BCrypt 해시. GOOGLE 전용 계정(연동된 `oauth_user`만 있고 비밀번호를 설정한 적 없는 경우)은 NULL |
+| role | VARCHAR(20) | X | 권한 (USER/ADMIN), 기본값 USER |
 | status | VARCHAR(20) | X | 계정 상태 (ACTIVE/DORMANT/DELETED), 기본값 ACTIVE |
 | email_verified | BOOLEAN | X | 이메일 인증 완료 여부, 기본값 FALSE |
 | nickname | VARCHAR(20) | X | 닉네임, UNIQUE |
@@ -74,6 +76,11 @@ LOCAL 가입자는 `password`가 반드시 있고 `oauth_user` 행이 없습니�
 회원 탈퇴는 Soft Delete로 처리합니다. `status`를 `'DELETED'`로 바꾸고 같은 시점에
 `deleted_at`을 채우며, `users` 행 자체는 삭제하지 않습니다. 개인정보를 즉시 파기하지
 않는다는 뜻이며, 계정 복구(탈퇴 취소) 기능은 추후 개발 예정입니다.
+
+`role`은 시스템 관리자(ADMIN)와 일반 사용자(USER)를 구분합니다. 로그인 시 발급되는
+JWT에 클레임으로 포함되어, 다른 서비스(예: Cultivation Service의 문의 답변/재배
+삭제)가 이 값으로 관리자 전용 기능을 인가합니다. 다른 서비스는 `role` 값을 DB로
+직접 조회하지 않고 JWT 클레임만으로 판단합니다 — Auth DB를 공유하지 않기 때문입니다.
 
 ---
 
@@ -103,6 +110,8 @@ CREATE TABLE users (
 
     password VARCHAR(255),
 
+    role VARCHAR(20) NOT NULL DEFAULT 'USER',
+
     status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
 
     email_verified BOOLEAN NOT NULL DEFAULT FALSE,
@@ -122,6 +131,8 @@ CREATE TABLE users (
     CONSTRAINT uk_users_email UNIQUE (email),
 
     CONSTRAINT uk_users_nickname UNIQUE (nickname),
+
+    CONSTRAINT chk_users_role CHECK (role IN ('USER', 'ADMIN')),
 
     CONSTRAINT chk_users_status CHECK (status IN ('ACTIVE', 'DORMANT', 'DELETED')),
 
@@ -192,5 +203,6 @@ Auth Service는 다른 서비스와 데이터베이스를 공유하지 않습니
   반드시 `oauth_user`를 통한 로그인만 가능합니다. 이 정합성은 애플리케이션 레벨에서
   보장하며, DB 제약으로는 강제하지 않습니다(비밀번호 재설정 등으로 나중에 채워질 수
   있으므로).
-- 역할 기반 접근 제어(관리자 전용 기능 등)는 아직 구현되어 있지 않아 `role` 컬럼을 두지
-  않았습니다. 필요해지면 별도 테이블(예: `user_role`)로 추가하는 것을 권장합니다.
+- `role`은 USER/ADMIN 두 값만 사용하는 단순한 전역 권한이라 별도 테이블 없이 `users`에
+  컬럼으로 두었습니다. 재배별 역할(소유자/참여자 구분) 같은 세분화된 권한 모델은 아직
+  없습니다.
