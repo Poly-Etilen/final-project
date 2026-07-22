@@ -11,8 +11,7 @@ InfluxDB(이력)에 저장합니다.
 
 # 책임
 
-- 센서 측정값 저장(Redis/InfluxDB)·조회·통계
-- 주간 리포트용 집계 데이터 생성 (Weekly Scheduler)
+- 센서 측정값 저장(Redis/InfluxDB)·조회·통계 (일일 피드백용 일간 통계 집계 포함)
 - 센서 장치 등록/조회/삭제 (`sensor`, `sensor_type`)
 - 목표 환경 범위 저장/조회/평균 계산 (`environment_setting`)
 - 버섯 참조 데이터 관리 (`mushroom_reference`, `mushroom_reference_threshold`)
@@ -83,11 +82,12 @@ POST /api/v1/sensors/environment-averages (내부용, 배치 조회)
 
 ---
 
-## 센서 통계/리포트
+## 센서 통계
 
 GET /api/v1/sensors/cultivations/{cultivationId}/current
 
-GET /api/v1/sensors/cultivations/{cultivationId}/stats
+GET /api/v1/sensors/cultivations/{cultivationId}/stats (기간별 집계, AI Service의
+일일 피드백은 최근 24시간 기준으로 호출)
 
 ---
 
@@ -142,7 +142,7 @@ Sensor Service는 하나의 PostgreSQL Database와 Redis/InfluxDB를 사용합�
 
 ### AI Service
 
-- 환경 변경 이력/평균 조회, 버섯 참조 데이터 조회
+- 환경 변경 이력/평균/일간 통계 조회(일일 피드백용), 버섯 참조 데이터 조회
 
 ### API Gateway
 

@@ -107,7 +107,6 @@ Sensor Service가 발행하는 이벤트(평상시) + 서비스 시작 시 OpenF
 | Auth: 이메일 인증 | `email:{email}` | 5분 |
 | AI: 챗봇 응답 캐시 | `ai:{hash}` | 24시간 |
 | AI: 생육 분석 결과 캐시 | `ai:{cultivationId}:analysis` | 6시간 |
-| AI: 리포트 캐시 | `report:{cultivationId}:weekly` | 24시간 (Weekly Scheduler push) |
 | AI: 버섯 가이드 캐시 | `ai:mushroom:{mushroomType}:guide` | 7일 |
 | AI: 인사이트 캐시 | `ai:{cultivationId}:insight` | 24시간 (사용자 요청 시 채워짐) |
 | Rule Engine: 목표 환경 범위 캐시 | `cultivation:{cultivationId}:range` | 24시간 (write-through) |

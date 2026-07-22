@@ -48,6 +48,12 @@ PK  id
     feedback_date
     has_growth_data
     content
+    avg_temperature
+    avg_humidity
+    avg_co2
+    avg_light
+    max_temperature
+    min_temperature
     created_at
 
     UNIQUE(cultivation_id, feedback_date)
@@ -124,7 +130,10 @@ PK  id
 
 ## daily_feedback
 
-Daily Scheduler가 매일 재배별로 생성하는 일일 피드백 결과입니다.
+Daily Scheduler가 매일 재배별로 생성하는 일일 피드백 결과입니다. 생육 추이 비교
+내용과 함께, 그날의 환경 통계(최근 24시간 집계)도 같은 행에 저장합니다 — 재배
+기간이 한 달을 넘지 않는 도메인 특성상 별도의 주간/월간 리포트 테이블을 두지 않고
+이 테이블 하나로 통합했습니다.
 
 | 컬럼명 | 타입 | NULL | 설명 |
 |---------|------|------|------|
@@ -132,11 +141,20 @@ Daily Scheduler가 매일 재배별로 생성하는 일일 피드백 결과입�
 | cultivation_id | BIGINT | X | 대상 재배 (소프트 참조) |
 | feedback_date | DATE | X | 이 피드백이 다루는 날짜 |
 | has_growth_data | BOOLEAN | X | 그날 `growth_record`가 있었는지 여부 |
-| content | TEXT | X | 피드백 본문 |
+| content | TEXT | X | 피드백 본문 (생육 비교 + 환경 통계 해석) |
+| avg_temperature | NUMERIC(5,2) | O | 최근 24시간 평균 온도 |
+| avg_humidity | NUMERIC(5,2) | O | 최근 24시간 평균 습도 |
+| avg_co2 | NUMERIC(8,2) | O | 최근 24시간 평균 CO₂ |
+| avg_light | NUMERIC(6,2) | O | 최근 24시간 평균 조도 |
+| max_temperature | NUMERIC(5,2) | O | 최근 24시간 최고 온도 |
+| min_temperature | NUMERIC(5,2) | O | 최근 24시간 최저 온도 |
 | created_at | DATETIME | X | 생성 시각 |
 
-`has_growth_data`가 false이면 `content`에는 고정 안내 문구가 들어갑니다.
-`UNIQUE(cultivation_id, feedback_date)`로 하루에 한 번만 생성되도록 합니다.
+`has_growth_data`가 false이면 `content`의 생육 비교 부분에는 고정 안내 문구가
+들어갑니다. 환경 통계 컬럼들은 `has_growth_data`와 무관하게 Sensor Service의
+InfluxDB 집계 조회 결과로 매일 채워지며, 그날 측정값이 전혀 없었던 경우(예: 재배
+생성 당일)에만 NULL로 남습니다. `UNIQUE(cultivation_id, feedback_date)`로 하루에
+한 번만 생성되도록 합니다.
 
 ---
 
@@ -236,6 +254,18 @@ CREATE TABLE daily_feedback (
     has_growth_data BOOLEAN NOT NULL,
 
     content TEXT NOT NULL,
+
+    avg_temperature NUMERIC(5,2),
+
+    avg_humidity NUMERIC(5,2),
+
+    avg_co2 NUMERIC(8,2),
+
+    avg_light NUMERIC(6,2),
+
+    max_temperature NUMERIC(5,2),
+
+    min_temperature NUMERIC(5,2),
 
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -343,6 +373,8 @@ AI Service는 다른 서비스와 데이터베이스를 공유하지 않습니�
   수정하지 않으므로 `updated_at`을 두지 않았습니다.
 - `daily_feedback`은 사진을 안 찍은 날도 반드시 한 행이 생성됩니다(`has_growth_data =
   false`) — "피드백 없음"과 "비교 데이터 없음"을 구분하기 위함입니다.
+- `daily_feedback`의 환경 통계 컬럼(`avg_temperature`~`min_temperature`)은 별도의
+  주간/월간 리포트 테이블을 두지 않고 이 테이블에 통합한 결과입니다.
 - `insight.harvest_id`는 UNIQUE 제약으로 같은 수확 건의 중복 적재를 막습니다.
 - 데이터가 무한히 쌓이는 이력성 테이블들이라, 운영 단계에서는 오래된 데이터에 대한 보관
   주기 정책이 필요할 수 있습니다(추후 개발 예정).

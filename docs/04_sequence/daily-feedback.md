@@ -3,19 +3,25 @@
 ## 개요
 
 사용자가 재배 환경(온도/습도/CO₂/조도)을 직접 수정했을 때, 그 수정이 실제 생육에
-도움이 됐는지를 매일 알려주는 기능입니다. 예를 들어 `mushroom_reference`의 추천
-온도보다 사용자가 임의로 온도를 높였는데, 그 이후 생육 점수가 개선되는 추세라면 이를
-짚어줍니다.
+도움이 됐는지를 매일 알려주는 동시에, 지난 24시간의 환경 통계(평균/최고/최저
+온도·습도·CO₂·조도)를 함께 요약해 제공하는 기능입니다. 재배 기간이 한 달을 넘지
+않는 도메인 특성상 별도의 주간/월간 리포트는 두지 않고, 이 일일 피드백 하나로
+"환경이 어땠는지"와 "그 환경이 생육에 어떤 영향을 줬는지"를 한 번에 전달합니다.
+
+예를 들어 `mushroom_reference`의 추천 온도보다 사용자가 임의로 온도를 높였는데, 그
+이후 생육 점수가 개선되는 추세라면 이를 짚어줍니다.
 
 AI Service의 Daily Scheduler가 매일 재배별로 생육 분석 이력(`growth_record`)과 환경
-변경 이력(Sensor Service의 `environment_setting`)을 비교해 피드백을 생성합니다. 주간
-리포트([ai-report.md](./ai-report.md))와 마찬가지로 push 모델이며, 사용자가 생성을
-요청하지 않습니다.
+변경 이력(Sensor Service의 `environment_setting`), 그리고 지난 24시간 환경
+통계(Sensor Service의 InfluxDB 집계)를 모아 피드백을 생성합니다. push 모델이며,
+사용자가 생성을 요청하지 않습니다.
 
-전날 사용자가 생육 사진을 찍지 않았다면 비교할 `growth_record`가 없으므로, 그 경우에는
-LLM을 호출하지 않고 고정된 안내 문구로 피드백을 대신합니다. 이 경우에도 그날의
-`daily_feedback` 행은 반드시 생성됩니다(건너뛰지 않음) — 사용자가 "오늘은 피드백이 아예
-없다"와 "오늘은 사진이 없어서 비교를 못 했다"를 구분할 수 있도록 하기 위해서입니다.
+전날 사용자가 생육 사진을 찍지 않았다면 비교할 `growth_record`가 없으므로, 그
+경우에는 생육 비교 부분만 LLM을 호출하지 않고 고정된 안내 문구로 대신합니다. 이
+경우에도 그날의 `daily_feedback` 행은 반드시 생성되며(건너뛰지 않음), 환경 통계는
+생육 데이터 유무와 무관하게 별도로 조회되어 함께 저장됩니다 — 사용자가 "오늘은
+피드백이 아예 없다"와 "오늘은 사진이 없어서 비교를 못 했다"를 구분할 수 있도록 하기
+위해서입니다.
 
 "성장 데이터 없음" 여부는 매일 독립적으로 그날 기준으로 판단합니다. 전날 사진을 못
 찍었다고 다음날 판단에 영향을 주지는 않습니다.
@@ -32,8 +38,9 @@ RUNNING 상태 재배 순회
 재배별로 growth_record 조회 (오늘 날짜 기준 존재 여부 + 최근 며칠 추이)
 ↓
 Sensor Service OpenFeign 호출 (environment_setting 최근 변경 이력)
-├── 오늘 growth_record 있음 → LLM 호출 (환경 변경 vs 생육 추이 상관관계 해석)
-└── 오늘 growth_record 없음 → LLM 미호출, 고정 안내 문구 사용
++ Sensor Service OpenFeign 호출 (최근 24시간 환경 통계: 평균/최고/최저 온도·습도·CO₂·조도)
+├── 오늘 growth_record 있음 → LLM 호출 (환경 변경/통계 vs 생육 추이 상관관계 해석)
+└── 오늘 growth_record 없음 → LLM 미호출, 생육 비교는 고정 안내 문구 사용 (환경 통계는 그대로 저장)
 ↓
 daily_feedback 저장 (PostgreSQL)
 ↓
@@ -84,43 +91,76 @@ AI Service → OpenFeign → Sensor Service (`GET
 
 ---
 
-## 4-A. growth_record가 있는 경우
+## 4. 환경 통계 조회 (최근 24시간)
+
+AI Service → OpenFeign → Sensor Service (`GET
+/api/v1/sensors/cultivations/{cultivationId}/stats`, 최근 24시간 기준)
+
+```json
+{
+    "averageTemperature": 22.1,
+    "averageHumidity": 90.3,
+    "averageCo2": 810,
+    "averageLight": 430,
+    "maxTemperature": 24.5,
+    "minTemperature": 20.2
+}
+```
+
+Sensor Service가 InfluxDB에서 최근 24시간 데이터를 집계해 반환합니다. 이 단계는
+`growth_record` 유무와 무관하게 항상 수행됩니다 — 생육 사진을 찍지 않은 날에도 환경
+통계는 조회/저장됩니다. 그날 측정값이 아직 하나도 없으면(예: 재배 생성 당일) 통계
+없이 `null`로 저장됩니다.
+
+---
+
+## 5-A. growth_record가 있는 경우
 
 AI Service → LLM
 
 입력: 최근 며칠간의 `growth_record` 추이(growthScore, myceliumGrowthRate 등), 같은
-기간의 `environment_setting` 변경 이력
+기간의 `environment_setting` 변경 이력, 오늘의 환경 통계(평균/최고/최저)
 
 ```json
 {
     "hasGrowthData": true,
-    "content": "온도를 22℃에서 24℃로 높인 이후 균사 성장률이 평균 6%p 개선되는 추세입니다. 현재 설정을 유지해도 좋아 보입니다."
+    "content": "온도를 22℃에서 24℃로 높인 이후 균사 성장률이 평균 6%p 개선되는 추세입니다. 오늘 평균 온도는 22.1℃로 적정 범위를 유지했습니다. 현재 설정을 유지해도 좋아 보입니다."
 }
 ```
 
 ---
 
-## 4-B. growth_record가 없는 경우
+## 5-B. growth_record가 없는 경우
 
-LLM을 호출하지 않고 고정 문구를 사용합니다.
+생육 비교 부분은 LLM을 호출하지 않고 고정 문구를 사용합니다. 환경 통계는 4번
+단계에서 조회한 값을 그대로 저장합니다.
 
 ```json
 {
     "hasGrowthData": false,
-    "content": "전날 사진이 없어 피드백을 남길 수 없습니다."
+    "content": "전날 사진이 없어 생육 비교는 어렵지만, 오늘 평균 온도는 22.1℃로 적정 범위를 유지했습니다."
 }
 ```
 
+그날 환경 통계 자체가 없다면(측정값 없음) 환경 언급 없이 순수 고정 문구만
+사용합니다: `"전날 사진이 없어 피드백을 남길 수 없습니다."`
+
 ---
 
-## 5. daily_feedback 저장
+## 6. daily_feedback 저장
 
 ```json
 {
     "cultivationId": 3,
     "feedbackDate": "2026-08-15",
     "hasGrowthData": true,
-    "content": "온도를 22℃에서 24℃로 높인 이후 균사 성장률이 평균 6%p 개선되는 추세입니다."
+    "content": "온도를 22℃에서 24℃로 높인 이후 균사 성장률이 평균 6%p 개선되는 추세입니다.",
+    "averageTemperature": 22.1,
+    "averageHumidity": 90.3,
+    "averageCo2": 810,
+    "averageLight": 430,
+    "maxTemperature": 24.5,
+    "minTemperature": 20.2
 }
 ```
 
@@ -128,14 +168,14 @@ LLM을 호출하지 않고 고정 문구를 사용합니다.
 
 ---
 
-## 6. 완료 이벤트 발행
+## 7. 완료 이벤트 발행
 
 AI Service → RabbitMQ Publish(`DailyFeedbackCompletedEvent`) → Notification Service
 (사용자 알림)
 
 ---
 
-## 7. 사용자 조회 (별도 흐름)
+## 8. 사용자 조회 (별도 흐름)
 
 위 흐름과 독립적으로, 사용자는 언제든 지금까지 쌓인 일일 피드백을 조회할 수 있습니다.
 
@@ -144,6 +184,7 @@ GET /api/v1/ai/feedback/daily?cultivationId=3
 ```
 
 AI Service가 `daily_feedback`을 `cultivation_id`, 최신순으로 조회해 반환합니다.
+응답에는 생육 비교 내용과 그날의 환경 통계가 함께 포함됩니다.
 
 ---
 
@@ -156,12 +197,16 @@ growth_record (AI DB, 조회 전용)
 daily_feedback (AI DB)
 ```
 
+## InfluxDB
+
+일일 환경 통계 조회 (Sensor Service 경유)
+
 ---
 
 # OpenFeign
 
 ```
-AI Service → Sensor Service (environment_setting 최근 변경 이력 조회)
+AI Service → Sensor Service (environment_setting 최근 변경 이력 조회, 최근 24시간 환경 통계 조회)
 ```
 
 ---
@@ -185,8 +230,8 @@ Notification Service
 # 예외 상황
 
 - Daily Scheduler 실행 실패 (해당 날짜는 `daily_feedback`이 생성되지 않음)
-- Sensor Service 호출 실패 (환경 변경 이력 조회 실패 — 환경 비교 없이 생육 추이만으로
-  피드백을 생성하거나, 해당 재배는 다음날 재시도)
+- Sensor Service 호출 실패 (환경 변경 이력 또는 환경 통계 조회 실패 — 실패한 부분만
+  비워두고 나머지 정보만으로 피드백을 생성하거나, 해당 재배는 다음날 재시도)
 - LLM 응답 실패
 - `daily_feedback` 저장 실패
 - `DailyFeedbackCompletedEvent` 발행 실패 (피드백 자체는 저장되어 조회는 가능하지만
@@ -200,6 +245,11 @@ Notification Service
   조회만 합니다.
 - 사진을 안 찍은 날도 `daily_feedback` 행은 반드시 생성됩니다(`hasGrowthData = false`,
   고정 문구). "피드백 없음"과 "비교 데이터 없음"을 구분하기 위해서입니다.
+- 환경 통계(평균/최고/최저)는 생육 데이터 유무와 독립적으로 매일 조회/저장됩니다.
+  재배 기간이 한 달을 넘지 않는 도메인 특성상 별도의 주간/월간 리포트는 두지 않고,
+  이 일일 피드백에 통합해 하루 단위로만 제공합니다.
+- 환경 통계는 Sensor Service에서만 계산합니다(InfluxDB 집계). AI Service는 그 값을
+  받아 생육 추이와 함께 자연어로 해석하는 역할만 담당합니다.
 - Redis 캐시를 사용하지 않습니다. 하루에 한 번만 생성되고 바로 영구 저장되므로 별도
   캐시가 필요 없습니다.
 - `growth_record`는 `ai:{cultivationId}:analysis` Redis 캐시(TTL 6시간, 생육 분석

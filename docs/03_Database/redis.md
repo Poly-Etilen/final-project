@@ -162,46 +162,6 @@ TTL
 
 ---
 
-## AI 리포트 Cache
-
-Weekly Scheduler가 매주 먼저 집계 데이터를 전달하면 AI Service가 리포트를 생성해 이 캐시에
-저장해 둡니다(push). 사용자 요청 시점에 생성하지 않고, 조회만 이 캐시에서 이루어집니다.
-재배 기간이 한 달을 넘지 않아 월간 리포트는 만들지 않으므로 키에 `period`를 두지 않고
-`weekly`로 고정합니다.
-
-Key
-
-```
-report:{cultivationId}:weekly
-```
-
-Example
-
-```
-report:3:weekly
-```
-
-Value
-
-```json
-{
-  "period": "weekly",
-  "averageTemperature": 22.1,
-  "environmentMaintainRate": 95,
-  "report": "..."
-}
-```
-
-TTL
-
-```
-24시간
-```
-
-매주 Weekly Scheduler 실행 시 새 값으로 덮어씁니다.
-
----
-
 ## 버섯 가이드 Cache
 
 버섯 종류(공공데이터 기준 5가지 고정)별 효능/재배 주의사항은 항상 같은 내용이므로,
@@ -388,12 +348,12 @@ Redis는 항상 갱신하지만, InfluxDB는 재배별 10초 간격으로 스로
 
 - AI 챗봇 응답 (ai:{hash}, TTL 24시간)
 - AI 생육 분석 결과 (ai:{cultivationId}:analysis, TTL 6시간)
-- AI 리포트 (report:{cultivationId}:weekly, TTL 24시간, Weekly Scheduler가 push로 채워둠)
 - 버섯 가이드 (ai:mushroom:{mushroomType}:guide, TTL 7일)
 - 인사이트 (ai:{cultivationId}:insight, TTL 24시간, 사용자 요청 시점에 채워짐)
 
-일일 피드백은 Redis에 캐시하지 않습니다. 하루에 한 번만 생성되고 `daily_feedback`
-테이블(PostgreSQL)에 바로 영구 저장되므로 별도 캐시가 필요하지 않습니다.
+일일 피드백(환경 통계 포함)은 Redis에 캐시하지 않습니다. 하루에 한 번만 생성되고
+`daily_feedback` 테이블(PostgreSQL)에 바로 영구 저장되므로 별도 캐시가 필요하지
+않습니다.
 
 ---
 
@@ -595,7 +555,6 @@ TTL을 사용하는 데이터
 - 이메일 인증 (5분)
 - AI 챗봇 응답 캐시 (24시간)
 - AI 생육 분석 결과 캐시 (6시간)
-- AI 리포트 캐시 (24시간, Weekly Scheduler가 매주 갱신)
 - 버섯 가이드 캐시 (7일)
 - 인사이트 캐시 (24시간, 사용자 요청 시점에 채워짐)
 - 목표 환경 범위 캐시 (Rule Engine Service, 24시간)

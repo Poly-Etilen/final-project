@@ -64,7 +64,7 @@ PK  id
 | 컬럼명 | 타입 | NULL | 설명 |
 |---------|------|------|------|
 | id | BIGSERIAL | X | PK |
-| event_type | VARCHAR(50) | X | 이벤트 유형 (ENVIRONMENT_CONTROL/SENSOR_ERROR/HARVEST_COMPLETED/CULTIVATION_FINISHED/WEEKLY_REPORT/DAILY_FEEDBACK) |
+| event_type | VARCHAR(50) | X | 이벤트 유형 (ENVIRONMENT_CONTROL/SENSOR_ERROR/HARVEST_COMPLETED/CULTIVATION_FINISHED/DAILY_FEEDBACK) |
 | message | TEXT | O | 사용자에게 보여줄 기본 메시지 |
 | created_at | DATETIME | X | 수신 일시 |
 
@@ -134,7 +134,6 @@ CREATE TABLE notification_event (
         'SENSOR_ERROR',
         'HARVEST_COMPLETED',
         'CULTIVATION_FINISHED',
-        'WEEKLY_REPORT',
         'DAILY_FEEDBACK'
     ))
 );

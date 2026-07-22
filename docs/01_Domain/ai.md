@@ -3,8 +3,9 @@
 ## 역할
 
 AI Service는 LLM과 Vision 모델을 활용해 지능형 기능을 제공하는 서비스입니다. 생육 사진
-분석, 자연어 챗봇(웹/앱/Telegram/Discord), 주간 리포트, 일일 피드백, "인사이트"(타인의
-유사 재배 사례 기반 피드백), 버섯 가이드(효능/주의사항)를 담당합니다.
+분석, 자연어 챗봇(웹/앱/Telegram/Discord), 일일 피드백(생육 추이 비교 + 환경 통계),
+"인사이트"(타인의 유사 재배 사례 기반 피드백), 버섯 가이드(효능/주의사항)를
+담당합니다.
 
 ---
 
@@ -12,8 +13,7 @@ AI Service는 LLM과 Vision 모델을 활용해 지능형 기능을 제공하는
 
 - 생육 사진 Vision 분석
 - AI 챗봇 (APP/Telegram/Discord 다채널, 대화 이력 저장/조회)
-- 주간 리포트 생성 (Weekly Scheduler push 기반)
-- 일일 피드백 생성 (Daily Scheduler)
+- 일일 피드백 생성 (생육 추이 비교 + 환경 통계, Daily Scheduler)
 - 인사이트 사례 적재(수확 완료 시점) 및 조회
 - 버섯 가이드(효능/주의사항) 생성
 
@@ -53,22 +53,18 @@ TTL 6시간)로 빠른 재조회를 지원하는 동시에 `growth_record`에 �
 
 ---
 
-## 주간 리포트
-
-Sensor Service의 Weekly Scheduler가 매주 집계 데이터를 먼저 전달(push)하면, AI Service가
-그 자리에서 리포트를 생성해 Redis(`report:{cultivationId}:weekly`, TTL 24시간)에 저장한 뒤
-`WeeklyReportCompletedEvent`를 발행합니다. 재배 기간이 한 달을 넘지 않아 월간 리포트는
-제공하지 않습니다.
-
----
-
 ## 일일 피드백
 
 사용자가 환경(온도/습도/CO₂/조도)을 직접 수정했을 때, 그 수정이 생육에 실제로 도움이
-됐는지 매일 알려주는 기능입니다. Daily Scheduler가 매일 재배별로 `growth_record`(생육 추이)와
-Sensor Service의 `environment_setting`(환경 변경 이력)을 비교해 LLM으로 피드백을 생성하고
-`daily_feedback`에 저장합니다. 사진을 찍지 않아 비교할 `growth_record`가 없으면 LLM을
-호출하지 않고 고정 문구로 피드백을 생성합니다(이 경우도 `daily_feedback` 행은 생성됨).
+됐는지 매일 알려주는 동시에, 지난 24시간의 환경 통계(평균/최고/최저 온도·습도·CO₂·조도)를
+함께 요약해 제공하는 기능입니다. 재배 기간이 한 달을 넘지 않는 도메인 특성상 별도의
+주간/월간 리포트는 두지 않고, 이 기능 하나로 통합해 제공합니다.
+
+Daily Scheduler가 매일 재배별로 `growth_record`(생육 추이), Sensor Service의
+`environment_setting`(환경 변경 이력), Sensor Service의 InfluxDB 집계(최근 24시간 환경
+통계)를 모아 LLM으로 피드백을 생성하고 `daily_feedback`에 저장합니다. 사진을 찍지 않아
+비교할 `growth_record`가 없으면 생육 비교 부분만 LLM을 호출하지 않고 고정 문구로
+대신합니다(이 경우도 `daily_feedback` 행은 생성되며, 환경 통계는 그대로 함께 저장됨).
 
 ---
 
@@ -118,9 +114,7 @@ GET /ai/chat/history
 
 ---
 
-## 리포트/피드백/인사이트/가이드
-
-GET /ai/report
+## 피드백/인사이트/가이드
 
 GET /ai/feedback/daily
 
@@ -147,7 +141,10 @@ AI Service는 하나의 PostgreSQL Database를 사용합니다.
 
 # Redis
 
-- 챗봇 응답 캐시, 생육 분석 결과 캐시, 리포트 캐시, 버섯 가이드 캐시, 인사이트 캐시
+- 챗봇 응답 캐시, 생육 분석 결과 캐시, 버섯 가이드 캐시, 인사이트 캐시
+
+일일 피드백(환경 통계 포함)은 Redis에 캐시하지 않습니다. 하루에 한 번만 생성되어
+`daily_feedback` 테이블에 바로 영구 저장되기 때문입니다.
 
 자세한 내용은 [redis.md](../03_Database/redis.md) 참고.
 
@@ -163,7 +160,8 @@ AI Service는 하나의 PostgreSQL Database를 사용합니다.
 
 ### Sensor Service
 
-- 센서 데이터 조회, 환경 변경 이력/평균 조회, 버섯 참조 데이터(RAG 컨텍스트) 조회
+- 센서 데이터 조회, 환경 변경 이력/평균/일간 통계 조회, 버섯 참조 데이터(RAG 컨텍스트)
+  조회
 
 ### Notification Service
 
@@ -177,13 +175,9 @@ AI Service는 하나의 PostgreSQL Database를 사용합니다.
 
 - 생육 사진 Vision 분석 요청
 
-### Sensor Service
-
-- Weekly Scheduler가 집계한 주간 통계 전달(push)
-
 ### API Gateway
 
-- 챗봇/리포트/피드백/인사이트/가이드 REST API 요청
+- 챗봇/피드백/인사이트/가이드 REST API 요청
 
 ---
 
@@ -191,7 +185,7 @@ AI Service는 하나의 PostgreSQL Database를 사용합니다.
 
 ## Publish
 
-### WeeklyReportCompletedEvent / DailyFeedbackCompletedEvent
+### DailyFeedbackCompletedEvent
 
 Notification Service가 구독해 알림을 보냅니다.
 
@@ -207,7 +201,7 @@ Cultivation Service가 수확 기록 시 발행합니다. 인사이트 사례(`i
 # Sequence
 
 관련 시퀀스는 [growth-analysis.md](../04_sequence/growth-analysis.md),
-[ai-chat.md](../04_sequence/ai-chat.md), [ai-report.md](../04_sequence/ai-report.md),
+[ai-chat.md](../04_sequence/ai-chat.md),
 [daily-feedback.md](../04_sequence/daily-feedback.md),
 [insight.md](../04_sequence/insight.md) 참고.
 

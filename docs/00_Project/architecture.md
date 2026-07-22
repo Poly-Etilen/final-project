@@ -7,9 +7,9 @@
 - API Gateway
 - Auth Service (인증/회원 프로필/탈퇴)
 - Cultivation Service (재배/수확/사진)
-- AI Service (챗봇/생육 분석/리포트/일일 피드백/인사이트/버섯 가이드)
+- AI Service (챗봇/생육 분석/일일 피드백/인사이트/버섯 가이드)
 - Rule Engine Service (MQTT 수신/Collector, 검증, 규칙 평가, 자동 제어, 센서 오류 감지)
-- Sensor Service (센서 장치/목표 환경/버섯 참조 데이터 관리, 측정값 저장/조회, 통계·차트, 주간 리포트 집계)
+- Sensor Service (센서 장치/목표 환경/버섯 참조 데이터 관리, 측정값 저장/조회, 통계·차트, 일일 피드백용 일간 통계 집계)
 - Notification Service
 - DatasourceGenerator
 
@@ -43,7 +43,7 @@ Rule Engine Service와 Sensor Service는 기본적으로 RabbitMQ(`EnvironmentMe
 ### Redis
 
 - Refresh Token / 이메일 인증번호 (Auth Service)
-- AI 응답·생육 분석·리포트·인사이트·버섯 가이드 캐시 (AI Service)
+- AI 응답·생육 분석·인사이트·버섯 가이드 캐시 (AI Service)
 - 목표 환경 범위 캐시 (Rule Engine Service)
 - 최신 센서 데이터 (Sensor Service)
 
@@ -129,17 +129,21 @@ growth_record 영구 저장 (AI DB)
 
 ---
 
-### 일일 피드백
+### 일일 피드백 (생육 추이 비교 + 환경 통계)
 
 ```
 Daily Scheduler (AI Service, 매일 23시)
 ↓
-growth_record(생육 추이) + environment_setting(환경 변경 이력) 비교
+growth_record(생육 추이) + environment_setting(환경 변경 이력) + 일간 환경 통계
+(Sensor Service, InfluxDB 최근 24시간 집계) 조회
 ↓
-LLM 해석 (또는 사진 없으면 고정 문구)
+LLM 해석 (사진 없으면 생육 비교만 고정 문구, 환경 통계는 그대로 반영)
 ↓
 daily_feedback 저장
 ```
+
+재배 기간이 한 달을 넘지 않는 도메인 특성상 별도의 주간/월간 리포트는 두지 않고, 이
+기능 하나로 통합해 매일 제공합니다.
 
 ---
 

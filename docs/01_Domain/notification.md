@@ -18,7 +18,7 @@ Notification Service는 시스템에서 발생한 이벤트를 Telegram/Discord 
 
 # 주요 기능
 
-## 환경 이상/자동 제어/센서 오류/리포트/피드백/수확/종료 알림
+## 환경 이상/자동 제어/센서 오류/일일 피드백/수확/종료 알림
 
 Rule Engine/Sensor/Cultivation/AI Service가 발행하는 이벤트를 구독해 `notification_event`로
 기록하고, 이벤트에 실린 `cultivationId`로 `notification_endpoint`를 조회해 등록된 채널로
@@ -102,7 +102,6 @@ Notification Service는 하나의 PostgreSQL Database를 사용합니다.
 - SensorErrorEvent
 - HarvestCompletedEvent
 - CultivationFinishedEvent
-- WeeklyReportCompletedEvent
 - DailyFeedbackCompletedEvent
 
 ---
