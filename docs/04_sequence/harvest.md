@@ -2,124 +2,98 @@
 
 ## 개요
 
-사용자가 재배를 종료하고 수확 결과를 기록하는 과정입니다.
+사용자가 재배 중 수확 결과를 기록하는 과정과, 재배를 종료하는 과정입니다. "수확 기록
+저장"과 "재배 종료"는 서로 다른 시점에 호출되는 별개의 API입니다.
 
-종료 전 사용자가 직접 촬영한 사진을 AI Vision 모델로 분석하여 생육 점수와 예상 수확 시기를 제공하며,
-사용자가 실제 수확량과 메모를 입력하면 재배가 종료됩니다.
+- **수확 기록 저장** — 재배가 `RUNNING`인 동안 사용자가 원할 때마다 여러 번 반복할 수
+  있습니다(같은 배지에서 1차/2차/3차로 여러 번 수확하는 "flush"를 표현). 재배 상태는
+  바뀌지 않습니다.
+- **재배 종료** — 더 이상 수확 정보를 받지 않으며, 재배 상태를 `FINISHED`로 바꾸는
+  별도의 단순한 동작입니다.
 
 ---
 
-# Sequence
+# Sequence — ① 수확 기록 저장 (여러 번 가능)
 
 ```text
 Client (사진 촬영, 선택)
-
 ↓
-
 API Gateway
-
 ↓
-
 Cultivation Service
-
 ↓
-
-MinIO 저장
-
+Photo Storage 저장 (MinIO 또는 Local)
 ↓
-
-AI Service (image_url 전달)
-
+AI Service (objectKey/storageType 전달)
 ↓
-
 Vision 모델 분석
-
 ↓
-
-생육 점수 계산
-
+growth_record 저장 (AI DB)
 ↓
-
-LLM
-
-↓
-
-결과 해석 및 개선 방안 생성
-
-↓
-
 Cultivation Service
-
 ↓
-
-Client
-
+Client (분석 결과 확인)
 ↓
-
-수확 정보 입력
-
+수확 기록 요청
 ↓
-
 Cultivation Service
-
 ↓
-
-PostgreSQL 저장
-
+flush_no 자동 채번 + harvest 행 저장
 ↓
-
-재배 상태 변경
-
+RabbitMQ (HarvestCompletedEvent)
 ↓
-
-RabbitMQ
-
-↓
-
 Notification Service
-
 ↓
+Client 알림
+```
 
+재배 상태는 `RUNNING`으로 그대로 유지됩니다.
+
+---
+
+# Sequence — ② 재배 종료 (별도 시점, 수확 정보 없음)
+
+```text
+Client
+↓
+API Gateway
+↓
+Cultivation Service
+↓
+재배 상태 변경 (RUNNING → FINISHED) + 종료일 저장
+↓
+RabbitMQ (CultivationFinishedEvent)
+↓
+Notification Service
+↓
 Client 알림
 ```
 
 ---
 
-# 상세 과정
+# 상세 과정 — 수확 기록 저장
 
 ## 1. 생육 분석용 사진 업로드 (선택)
 
-사용자는 수확 전 현재 생육 상태를 확인하기 위해 사진을 찍어 업로드할 수 있습니다.
-
-예시
-
 ```http
-POST /cultivations/{cultivationId}/photos
+POST /api/v1/cultivations/{cultivationId}/photos
 ```
 
-Cultivation Service는 사진을 MinIO에 저장하고 photo 메타데이터를 저장합니다.
+Cultivation Service는 사진을 Photo Storage(`storage_type`에 따라 MinIO 또는 로컬)에
+저장하고 `photo` 행(`object_key`, `storage_type`)을 남깁니다.
 
 ---
 
 ## 2. AI Service 호출
 
-Cultivation Service
-
-↓
-
-OpenFeign
-
-↓
-
-AI Service
-
-전달 데이터
+Cultivation Service → OpenFeign → AI Service (`POST /api/v1/ai/analysis`)
 
 ```json
 {
-    "cultivationId":3,
-    "mushroomType":"OYSTER",
-    "imageUrl":"https://minio/mushroom-photos/3/20260815-090000.jpg"
+    "cultivationId": 3,
+    "photoId": 7,
+    "objectKey": "3/20260815-090000.jpg",
+    "storageType": "MINIO"
 }
 ```
 
@@ -129,193 +103,131 @@ AI Service
 
 AI Service의 Vision 모델이 사진을 분석합니다.
 
-Vision 모델은 사전에 학습된 성장 단계별 이미지 패턴과 비교하여 판단합니다.
-
-분석 항목
-
-- 균사 성장률
-- 갓 크기
-- 색상 분석
-- 병충해 분석
-
-출력
+분석 항목: 균사 성장률, 갓 크기, 색상, 병충해 여부
 
 ```json
 {
-    "myceliumGrowthRate":97,
-    "capSize":"대(5.1cm)",
-    "colorStatus":"정상",
-    "diseaseStatus":"정상"
+    "myceliumGrowthRate": 68.5,
+    "capSize": "MEDIUM",
+    "color": "정상",
+    "diseaseDetected": false
 }
 ```
 
 ---
 
-## 4. 생육 점수 계산
+## 4. 생육 점수 계산 및 저장
 
-AI Service가 4가지 지표를 종합하여 점수를 계산합니다.
-
-```
-생육 점수 = 균사 성장률 40% + 갓 크기 점수 30% + 색상 점수 15% + 병충해 점수 15%
-```
-
-갓 크기가 수확 기준 크기 이상이면 성장 단계를 "수확 적기"로 판단합니다.
-
----
-
-## 5. LLM 해석
-
-AI Service
-
-↓
-
-LLM
-
-입력
-
-- 버섯 종류
-- 생육 점수
-- 균사 성장률 / 갓 크기 / 색상 / 병충해 여부
-- 성장 단계
-
-LLM은 위 지표를 새로 추정하지 않고, 해석 문장과 개선 방안만 생성합니다.
-
-출력
+AI Service가 4가지 지표를 종합해 `growthScore`를 계산하고, 성장 단계와 예상 수확일을
+함께 산출해 `growth_record`(AI DB)에 영구 저장합니다. 동시에 Redis
+(`ai:{cultivationId}:analysis`, TTL 6시간)에도 캐싱합니다.
 
 ```json
 {
-    "growthScore":94,
-    "myceliumGrowthRate":97,
-    "capSize":"대(5.1cm)",
-    "colorStatus":"정상",
-    "diseaseStatus":"정상",
-    "growthStage":"수확 적기",
-    "improvement":"현재 상태가 매우 양호하여 지금 수확하는 것을 권장합니다."
+    "growthRecordId": 55,
+    "growthScore": 82,
+    "growthStage": "생장기",
+    "expectedHarvestDate": "2026-08-20"
 }
 ```
 
 ---
 
-## 6. 분석 결과 반환
+## 5. 분석 결과 반환
 
-AI Service
+AI Service → Cultivation Service → Client
 
-↓
-
-Cultivation Service
-
-↓
-
-Client
-
-사용자는 생육 분석 결과를 참고하여 수확 시점을 결정합니다.
+사용자는 분석 결과를 참고해 수확 시점을 결정합니다.
 
 ---
 
-## 7. 수확 요청
+## 6. 수확 기록 요청
 
-사용자는
+```http
+POST /api/v1/cultivations/{cultivationId}/harvests
+```
 
-- 수확량
-- 메모
+```json
+{
+    "harvestWeight": 1800,
+    "memo": "1차 수확, 상태 양호"
+}
+```
 
-를 입력합니다.
+몇 번째 수확인지(`flushNo`)는 사용자가 입력하지 않습니다.
 
-예시
+---
+
+## 7. Harvest 저장
+
+Cultivation Service는 같은 `cultivation_id`의 기존 `harvest` 중 최댓값 + 1로 `flush_no`를
+채번하고, `harvest` 행을 새로 저장합니다. 재배 상태는 바뀌지 않습니다.
+
+---
+
+## 8. 응답
+
+```json
+{
+    "harvestId": 41,
+    "flushNo": 1,
+    "harvestWeight": 1800,
+    "harvestedAt": "2026-08-20T09:00:00"
+}
+```
+
+---
+
+## 9. Event 발행
+
+Cultivation Service → RabbitMQ Publish → `HarvestCompletedEvent`
+
+---
+
+## 10. Notification Service
+
+RabbitMQ Subscribe → 등록된 채널로 알림 전송
+
+```
+🍄 수확 기록 완료
+느타리 1호기 1차 수확이 기록되었습니다. 수확량: 1.8kg
+```
+
+---
+
+# 상세 과정 — 재배 종료
+
+## 1. 종료 요청
 
 ```http
 PATCH /api/v1/cultivations/{cultivationId}/finish
 ```
 
-```json
-{
-    "harvestWeight":3200,
-    "memo":"생육 상태 양호"
-}
-```
+## 2. 재배 종료 처리
 
----
+Cultivation Service는 종료일을 저장하고 재배 상태를 `RUNNING → FINISHED`로 변경합니다.
+`harvest` 행은 새로 생성하지 않으며, 지금까지 기록된 모든 flush가 그대로 수확 이력으로
+남습니다.
 
-## 8. Harvest 저장
-
-Cultivation Service는
-
-harvest 테이블에 수확 정보를 저장합니다.
-
-```
-harvest
-```
-
----
-
-## 9. 재배 종료
-
-Cultivation 상태 변경
-
-```
-RUNNING
-
-↓
-
-FINISHED
-```
-
-종료일을 저장합니다.
-
----
-
-## 10. 응답
-
-Client에게
+## 3. 응답
 
 ```json
 {
-    "message":"Cultivation Finished"
+    "cultivationId": 3,
+    "status": "FINISHED",
+    "finishedAt": "2026-09-01T10:00:00"
 }
 ```
 
-전달
+## 4. Event 발행
 
----
+Cultivation Service → RabbitMQ Publish → `CultivationFinishedEvent`
 
-## 11. Event 발행
-
-Cultivation Service
-
-↓
-
-RabbitMQ Publish
-
-```json
-{
-    "cultivationId":3,
-    "harvestWeight":3200,
-    "finishedAt":"2026-08-15T09:00:00"
-}
-```
-
-발행 이벤트
-
-- CultivationFinishedEvent
-- HarvestCompletedEvent
-
----
-
-## 12. Notification Service
-
-RabbitMQ Subscribe
-
-↓
-
-사용자에게 알림 전송
-
-예시
+## 5. Notification Service
 
 ```
-🍄 수확 완료
-
-느타리 1호기 재배가 종료되었습니다.
-수확량: 3.2kg
+🍄 재배 종료
+느타리 1호기 재배가 종료되었습니다. 총 수확 2회 (합계 3.2kg)
 ```
 
 ---
@@ -325,30 +237,25 @@ RabbitMQ Subscribe
 ## PostgreSQL
 
 ```
-cultivation
-
-harvest
-
-photo
+cultivation (Cultivation DB)
+harvest (Cultivation DB)
+photo (Cultivation DB)
+growth_record (AI DB)
 ```
 
----
+## Photo Storage
 
-## MinIO
-
-사용자가 업로드한 생육 사진 조회 (Cultivation Service가 저장, AI Service가 읽기 전용 조회)
+사용자가 업로드한 생육 사진(Cultivation Service가 저장, AI Service가 읽기 전용 조회)
 
 ---
 
 # OpenFeign
 
 ```
-Cultivation
-
-↓
-
-AI
+Cultivation Service → AI Service (생육 분석 요청)
 ```
+
+수확 기록 흐름에서만 호출합니다. 재배 종료 흐름은 다른 서비스를 동기 호출하지 않습니다.
 
 ---
 
@@ -357,8 +264,8 @@ AI
 Publish
 
 ```
-CultivationFinishedEvent
-HarvestCompletedEvent
+HarvestCompletedEvent (수확 기록마다)
+CultivationFinishedEvent (재배 종료 시 한 번)
 ```
 
 Subscribe
@@ -371,19 +278,10 @@ Notification Service
 
 # 상태 변화
 
-초기
-
 ```
 RUNNING
-```
-
-↓
-
-수확 정보 저장
-
-↓
-
-```
+↓ 수확 기록 저장 (여러 번 반복 가능, 상태 변화 없음)
+↓ 재배 종료 요청
 FINISHED
 ```
 
@@ -391,24 +289,21 @@ FINISHED
 
 # 예외 상황
 
-- 존재하지 않는 재배
-- 이미 종료된 재배
-- 권한 없는 재배 접근
-- 사진 업로드 실패
+- 존재하지 않는 재배 / 권한 없는 재배 접근
+- `FINISHED` 상태 재배에 수확 기록/사진 업로드 시도
+- 이미 종료된 재배에 다시 종료 요청
+- 사진 저장소 업로드 실패
 - Vision 모델 분석 실패
-- Harvest 저장 실패
-- RabbitMQ 발행 실패
-- Notification 전송 실패
+- RabbitMQ 발행 실패 / Notification 전송 실패 (수확 기록/종료 자체에는 영향 없음)
 
 ---
 
 # 고려 사항
 
-- AI 생육 분석은 선택 사항이며, 건너뛰고 바로 수확 정보를 입력할 수도 있습니다.
-- 생육 점수, 균사 성장률, 갓 크기, 색상, 병충해 여부, 성장 단계는 Vision 모델이 산출한 결과이며 LLM이 추정하지 않습니다.
-- LLM은 계산된 지표를 해석하는 설명과 개선 방안 생성에만 사용합니다.
-- 사진은 카메라 센서가 아닌 사용자가 직접 촬영하여 업로드합니다.
-- 생육 분석 결과는 `ai:{cultivationId}:analysis` Redis 캐시(TTL 6시간, 빠른 재조회용)뿐 아니라 `growth_record` 테이블(PostgreSQL, AI DB)에도 영구 저장됩니다. 업로드된 사진(photo)은 별도로 Cultivation DB에 이력으로 보관됩니다. (자세한 내용은 [growth-analysis.md](./growth-analysis.md) 참고)
-- 재배 종료와 수확 정보 저장은 하나의 API(PATCH /finish)로 함께 처리합니다.
-- 종료된 재배는 재배 이력(GET /cultivations/history)에서 조회할 수 있습니다.
-- Notification 전송 실패는 수확 처리 자체에 영향을 주지 않습니다.
+- AI 생육 분석은 선택 사항이며, 건너뛰고 바로 수확 기록을 남길 수도 있습니다.
+- `growthScore`/`myceliumGrowthRate`/`capSize`/`color`/`diseaseDetected`/`growthStage`는
+  Vision 모델이 산출한 결과입니다.
+- `flush_no`는 사용자가 지정하지 않고 Cultivation Service가 자동 채번합니다.
+- 종료된 재배는 재배 이력(`GET /cultivations/history`)에서 합산값
+  (`harvestCount`/`totalHarvestWeight`)으로 조회되며, 개별 수확 내역은
+  `GET /cultivations/{cultivationId}/harvests`로 따로 조회합니다.

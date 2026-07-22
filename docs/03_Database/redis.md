@@ -242,9 +242,9 @@ TTL
 ## 인사이트 Cache
 
 같은 버섯 종류 + 유사한 온도로 재배했던 타인의 사례를 바탕으로 한 피드백입니다. AI 리포트/
-버섯 가이드와 달리 스케줄러가 미리 채워두지 않고, 사용자가 요청한 시점(Cache Miss)에 Embedding
-Service 검색 + LLM 요약을 거쳐 채워지는 유일한 AI 캐시입니다. (자세한 내용은
-[insight.md](../04_sequence/insight.md) 참고)
+버섯 가이드와 달리 스케줄러가 미리 채워두지 않고, 사용자가 요청한 시점(Cache Miss)에
+AI DB `insight` 테이블 검색(SQL 필터) + LLM 요약을 거쳐 채워지는 유일한 AI 캐시입니다.
+(자세한 내용은 [insight.md](../04_sequence/insight.md) 참고)
 
 Key
 
@@ -275,7 +275,8 @@ TTL
 ```
 
 유사 사례가 하나도 매칭되지 않아 고정 안내 문구로 응답한 경우는 캐시에 저장하지 않습니다.
-배치 임베딩이 계속 진행되므로 다음 요청 시점에는 매칭될 수 있기 때문입니다.
+새로운 수확이 계속 기록되며 `insight` 테이블에 사례가 쌓이므로, 다음 요청 시점에는
+매칭될 수 있기 때문입니다.
 
 ---
 
@@ -323,10 +324,6 @@ TTL
 Sensor Service가 environment_setting을 생성/수정할 때 발행하는 EnvironmentRangeUpdatedEvent를
 구독해 값을 갱신하며, 이때 TTL도 24시간으로 다시 연장합니다(write-through). 캐시가 없을 때만
 Sensor Service를 OpenFeign으로 호출해 값을 채워 넣습니다.
-
-> ℹ️ **변경 이력**: `environment_setting`이 Cultivation Service에서 Sensor Service로
-> 이관되면서, 이 캐시의 write-through 발행 주체와 fallback 호출 대상이 모두 Sensor
-> Service로 바뀌었습니다.
 
 ---
 
@@ -540,7 +537,7 @@ Cultivation Service OpenFeign 호출 (버섯 종류 조회) + Sensor Service Ope
 
 ↓
 
-Embedding Service OpenFeign 호출 (유사 사례 검색)
+AI DB insight 테이블 검색 (mushroom_type 정확히 일치 + avg_temperature 오차 범위 SQL 필터)
 
 ↓
 
@@ -624,7 +621,7 @@ Redis 장애 발생 시
 
 - Cache Miss 처리
 - LLM 직접 호출
-- 인사이트는 원래도 사용자 요청마다 캐시 미스 시 재계산되는 흐름이라, Redis 장애 시에도 매번 Embedding Service 검색 + LLM 요약을 거쳐 응답은 가능합니다(속도만 저하)
+- 인사이트는 원래도 사용자 요청마다 캐시 미스 시 재계산되는 흐름이라, Redis 장애 시에도 매번 insight 테이블 검색 + LLM 요약을 거쳐 응답은 가능합니다(속도만 저하)
 
 ---
 

@@ -2,385 +2,426 @@
 
 ## 개요
 
-Sensor Database는 센서 "장치"의 메타데이터와, 사용자가 저장한 목표 환경(위험 한계값) 이력을
-관리하는 Sensor Service 소유의 PostgreSQL Database입니다.
+Sensor Database는 센서 "장치"의 메타데이터, 사용자가 저장한 목표 환경(위험 한계값) 이력,
+공공데이터 기반 버섯 참조 데이터를 관리하는 Sensor Service 소유의 PostgreSQL Database입니다.
+측정값(InfluxDB/Redis)과 통계/리포트를 이미 전담하고 있는 Sensor Service가 장치 메타데이터와
+목표 환경까지 함께 소유하는 것이 "database per service" 원칙에 맞다고 판단해 이 DB로
+모았습니다.
 
-> ℹ️ **변경 이력**: `sensor`, `environment_setting` 두 테이블은 원래 Cultivation DB에
-> 있었습니다. 팀 회의 결과, 센서 장치 CRUD와 목표 환경(위험 한계값) 저장/조회가 본질적으로
-> "센서" 도메인에 속하고, 이미 Sensor Service가 센서 측정값(InfluxDB/Redis)과 통계/차트/
-> 리포트를 전담하고 있어 센서 관련 책임을 한 서비스로 모으는 것이 "database per service"
-> 원칙에 더 맞는다고 판단해 Sensor Service로 이전했습니다. Cultivation Service는 이제
-> `mushroom_reference`/`cultivation`/`harvest`/`photo`만 소유합니다. (자세한 내용은
-> [cultivation-db.md](./cultivation-db.md), [README.md](../README.md)의 결정 사항 #24 참고)
-
-두 테이블 모두 `cultivation_id`를 갖지만, 이제 Cultivation DB와는 별도의 데이터베이스이므로
-**DB 레벨 외래키(FK)를 걸지 않습니다.** `cultivation_id`는 Cultivation Service의 `cultivation.id`를
-가리키는 순수 참조값(정수)일 뿐이며, 존재/소유권 검증은 필요 시 Cultivation Service를
-OpenFeign으로 호출해 확인합니다. (이 프로젝트에서 이미 `cultivation.user_id`가 Auth Service의
-`users.id`를 FK 없이 참조하던 것과 같은 패턴입니다.)
-
-기존에는 같은 DB 안에 있어 `cultivation` 삭제 시 `ON DELETE CASCADE`로 `sensor`/
-`environment_setting`이 자동으로 함께 삭제되었지만, DB가 분리되며 이 자동 정리가 더 이상
-불가능해졌습니다. 대신 Cultivation Service가 재배 삭제 시 `CultivationDeletedEvent`를
-발행하고, Sensor Service가 이를 구독해 해당 `cultivation_id`의 `sensor`/`environment_setting`
-행을 직접 삭제합니다(보상 정리, eventual consistency). (자세한 내용은 아래 "관계" 참고)
+온도/습도/CO₂/조도라는 같은 측정 항목 도메인이 `sensor_type`(장치가 실제 측정하는 항목),
+`environment_setting`(사용자가 설정한 목표 범위), `mushroom_reference_threshold`(버섯별
+추천 범위) 세 곳에서 공통으로 쓰이기 때문에, 이 값을 매번 자유 문자열로 반복하지 않고
+`measurement_type` 참조 테이블로 한 번만 정의합니다. 세 테이블은 이 테이블을 같은 DB 내
+실제 FK로 참조합니다.
 
 ---
 
 # ERD
 
 ```
-sensor  (cultivation_id는 다른 DB의 cultivation.id를 참조하는 순수 값, FK 없음)
+measurement_type (전역 참조, 4종 고정 시드 데이터)
 ──────────────────────────────────────────────
-PK  device_eui
-    cultivation_id
-    place
-    location
-    device_model
-    sensor_type
-    status
-    created_at
-    updated_at
+PK  code
+    name_ko
+    unit
 
-environment_setting  (1:N — cultivation당 여러 row, 항목별 × 이력별, FK 없음)
+
+sensor  (cultivation_id는 다른 DB의 cultivation.id를 참조하는 순수 값, FK 없음)
 ──────────────────────────────────────────────
 PK  id
     cultivation_id
-    type
-    min
-    max
-    unit
+    device_eui       (UNIQUE)
+    location
+    location_detail
+    device_model
+    status
+    is_deleted
+    created_at
+
+          │ 1
+          │
+          │
+          ▼
+sensor_type  (기기 하나가 여러 측정 항목을 가질 수 있음)
+──────────────────────────────────────────────
+PK  id
+FK  sensor_id
+FK  measurement_type_code
+    UNIQUE(sensor_id, measurement_type_code)
+
+
+environment_setting  (1:N — cultivation당 여러 row, 항목별 × 이력별)
+──────────────────────────────────────────────
+PK  id
+    cultivation_id
+FK  measurement_type_code
+    threshold_min
+    threshold_max
+    threshold_unit
+    created_at
+
+
+mushroom_reference (전역 참조 테이블, cultivation.mushroom_type 코드와 매칭되는 자연키)
+──────────────────────────────────────────────
+PK  id
+    mushroom_type     (UNIQUE — cultivation.mushroom_type이 참조하는 코드)
+    mushroom_name_ko
+    mushroom_name_en
+    mushroom_scientific_name
+    characteristics
+    health_benefits
+    cultivation_guide
+    additional_info
     created_at
     updated_at
+
+          │ 1
+          │
+          │
+          ▼
+mushroom_reference_threshold  (항목별 여러 row)
+──────────────────────────────────────────────
+PK  id
+FK  mushroom_reference_id
+FK  measurement_type_code
+    threshold_min
+    threshold_max
+    threshold_unit
+    created_at
+    updated_at
+
+    UNIQUE(mushroom_reference_id, measurement_type_code)
 ```
+
+`sensor`/`environment_setting`은 `cultivation_id`를 갖지만 Cultivation DB와는 별도의
+데이터베이스이므로 DB 레벨 FK를 걸지 않습니다. 존재/소유권 검증은 필요 시 Cultivation
+Service를 OpenFeign으로 호출해 확인합니다.
 
 ---
 
 # Table
 
+## measurement_type
+
+| 컬럼명 | 타입 | NULL | 설명 |
+|---------|------|------|------|
+| code | VARCHAR(20) | X | PK (자연키, 예: TEMPERATURE/HUMIDITY/CO2/LIGHT) |
+| name_ko | VARCHAR(20) | X | 표시용 한글 이름 (예: 온도) |
+| unit | VARCHAR(10) | X | 기본 단위 (예: ℃, %, ppm, lux) |
+
+측정 항목 4종의 고정 시드 데이터입니다. 새 측정 항목이 추가될 때만 여기에 행이 늘어나며,
+운영 중 자주 바뀌지 않습니다.
+
+---
+
 ## sensor
 
-재배에 연결된 센서 장치의 메타데이터를 관리합니다. (기존 Cultivation DB에서 이전, 그 이전에는
-DatasourceGenerator DB에 있었습니다.)
+| 컬럼명 | 타입 | NULL | 설명 |
+|---------|------|------|------|
+| id | BIGSERIAL | X | PK |
+| cultivation_id | BIGINT | X | 재배 참조값 (Cultivation Service, 소프트 참조) |
+| device_eui | VARCHAR(32) | X | 장치 고유 식별자 (LoRaWAN DevEUI), UNIQUE |
+| location | VARCHAR(10) | O | 설치 위치 (짧은 코드, 예: A동) |
+| location_detail | VARCHAR(50) | O | 세부 위치 |
+| device_model | VARCHAR(100) | O | 장치 모델명 |
+| status | VARCHAR(10) | X | 상태 (ONLINE/OFFLINE/ERROR), 기본값 OFFLINE, 시스템이 관리 |
+| is_deleted | BOOLEAN | X | 소프트 삭제 플래그, 기본값 FALSE |
+| created_at | DATETIME | X | 등록 일시 |
 
-| Column | Type | Description |
-|---------|------|-------------|
-| device_eui | VARCHAR(32) | PK, 장치 고유 식별자 (LoRaWAN DevEUI, 16자리 hex 문자열) |
-| cultivation_id | BIGINT | 재배 참조값 (다른 서비스 소유 데이터, FK 아님) |
-| place | VARCHAR(50) | 설치 장소 (예: 1동 A구역) |
-| location | VARCHAR(50) | 세부 위치 |
-| device_model | VARCHAR(100) | 장치 모델명 |
-| sensor_type | VARCHAR(30) | 센서 종류 |
-| status | VARCHAR(20) | 상태 (ONLINE/OFFLINE/ERROR/MAINTENANCE), 시스템이 관리 (사용자 입력 아님) |
-| created_at | TIMESTAMP | 생성일 |
-| updated_at | TIMESTAMP | 수정일 |
+PK는 대리키 `id`이고 `device_eui`는 UNIQUE 제약을 가진 일반 컬럼입니다. 삭제는 하드
+삭제가 아니라 `is_deleted` 플래그로 처리합니다 — 삭제된 센서라도 과거
+`environment_setting` 이력이 계속 의미를 가질 수 있게 하기 위함입니다.
 
-`place`/`location`/`device_model`/`sensor_type`은 사용자가 센서 등록 시 직접 입력하는 값이며,
-`status`는 등록 시 기본값(ONLINE)으로 시작해 이후 Rule Engine Service가 발행하는
-`SensorErrorEvent`로만 갱신됩니다. `cultivation_id`는 요청 body가 아니라 URL 경로로부터
-채워집니다.
+---
+
+## sensor_type
+
+| 컬럼명 | 타입 | NULL | 설명 |
+|---------|------|------|------|
+| id | BIGSERIAL | X | PK |
+| sensor_id | BIGINT | X | FK, `sensor.id` |
+| measurement_type_code | VARCHAR(20) | X | FK, `measurement_type.code` |
+
+장치 하나가 여러 항목을 동시에 측정할 수 있어 `sensor`와 1:N 관계입니다.
+`UNIQUE(sensor_id, measurement_type_code)`로 같은 장치에 같은 항목이 중복 등록되지 않게
+합니다.
 
 ---
 
 ## environment_setting
 
-사용자가 최종 저장한 환경값을 **범위(min~max)** 로, 항목(type)별 행으로 저장합니다. (기존
-Cultivation DB에서 이전)
-
-단일 목표값이 아닌 범위로 저장하는 이유는 Rule Engine Service의 자동 제어가 값이 범위를
-벗어날 때만 장치를 동작시키고, 범위 안에서는 불필요하게 켜고 끄지 않도록(허용 오차/
-히스테리시스) 하기 위함입니다. `type`(TEMPERATURE/HUMIDITY/CO2/LIGHT)별로 별도 행을 가지며,
-수정할 때도 UPDATE가 아니라 새 행을 INSERT합니다 — 이 테이블 하나가 "현재값"과 "이력"을
-동시에 표현합니다. "현재값"이 필요하면 `(cultivation_id, type)` 기준으로 가장 최신 행을
-조회합니다.
-
-| Column | Type | NULL | 설명 |
+| 컬럼명 | 타입 | NULL | 설명 |
 |---------|------|------|------|
 | id | BIGSERIAL | X | PK |
-| cultivation_id | BIGINT | X | 재배 참조값 (다른 서비스 소유 데이터, FK 아님) |
-| type | VARCHAR(20) | X | 환경 항목 (TEMPERATURE/HUMIDITY/CO2/LIGHT) |
-| min | DECIMAL(4,1) | X | 하한 |
-| max | DECIMAL(4,1) | X | 상한 |
-| unit | VARCHAR(10) | O | 단위 (예: ℃, %, ppm, lux) |
-| created_at | TIMESTAMP | X | 이 값이 저장된 시각 |
-| updated_at | TIMESTAMP | X | 생성 시각과 동일하게 유지됨 (UPDATE 경로 없음) |
+| cultivation_id | BIGINT | X | 재배 참조값 (소프트 참조) |
+| measurement_type_code | VARCHAR(20) | X | FK, `measurement_type.code` |
+| threshold_min | NUMERIC(10,4) | X | 하한 |
+| threshold_max | NUMERIC(10,4) | X | 상한 |
+| threshold_unit | VARCHAR(10) | X | 단위 |
+| created_at | DATETIME | X | 이 값이 저장된 시각 |
+| updated_at | DATETIME | O | 생성 시각과 동일하게 유지됨 (UPDATE 경로 없음) |
+
+사용자가 최종 저장한 환경값을 **범위**로, 항목별 행으로 저장합니다. 수정할 때도 UPDATE가
+아니라 새 행을 INSERT합니다 — 이 테이블 하나가 "현재값"과 "이력"을 동시에 표현합니다.
+"현재값"은 `(cultivation_id, measurement_type_code)` 기준 최신 행으로 조회합니다.
+
+---
+
+## mushroom_reference
+
+| 컬럼명 | 타입 | NULL | 설명 |
+|---------|------|------|------|
+| id | BIGSERIAL | X | PK |
+| mushroom_type | VARCHAR(20) | X | 버섯 종류 코드 (예: OYSTER), UNIQUE. `cultivation.mushroom_type`이 참조 |
+| mushroom_name_ko | VARCHAR(50) | X | 버섯 한글 이름 |
+| mushroom_name_en | VARCHAR(50) | X | 버섯 영문 이름 |
+| mushroom_scientific_name | VARCHAR(50) | O | 학명 |
+| characteristics | TEXT | O | 특성 설명 |
+| health_benefits | TEXT | O | 효능 |
+| cultivation_guide | TEXT | O | 재배 가이드 |
+| additional_info | TEXT | O | 추가 정보 |
+| created_at | DATETIME | X | 생성일 |
+| updated_at | DATETIME | O | 수정일 |
+
+공공데이터 기반 5종 버섯의 고정 시드 데이터입니다. `mushroom_type`이 `cultivation.mushroom_type`과
+연결되는 안정적인 코드 역할을 하고, `characteristics`/`health_benefits`/`cultivation_guide`/
+`additional_info`는 AI Service의 챗봇/버섯 가이드 기능이 `mushroomType`으로 정확히
+일치하는 한 건을 그대로 조회해 LLM 컨텍스트(RAG 원문)로 사용하는 텍스트입니다. 버섯
+종류가 5종 고정이라 별도의 임베딩·검색 색인 없이 직접 조회로 충분합니다.
+
+---
+
+## mushroom_reference_threshold
+
+| 컬럼명 | 타입 | NULL | 설명 |
+|---------|------|------|------|
+| id | BIGSERIAL | X | PK |
+| mushroom_reference_id | BIGINT | X | FK, `mushroom_reference.id` |
+| measurement_type_code | VARCHAR(20) | X | FK, `measurement_type.code` |
+| threshold_min | NUMERIC(10,4) | X | 하한 |
+| threshold_max | NUMERIC(10,4) | X | 상한 |
+| threshold_unit | VARCHAR(10) | X | 단위 |
+| created_at | DATETIME | X | 생성일 |
+| updated_at | DATETIME | O | 수정일 |
+
+버섯 종류별 최적 생육 환경 범위를 항목별 행으로 저장합니다.
+`UNIQUE(mushroom_reference_id, measurement_type_code)`로 같은 버섯의 같은 항목이 중복
+등록되지 않게 합니다.
 
 ---
 
 # DDL
 
-## sensor
-
 ```sql
-CREATE TABLE sensor (
+CREATE TABLE measurement_type (
+    code VARCHAR(20) PRIMARY KEY,
 
-    device_eui VARCHAR(32) NOT NULL PRIMARY KEY,
+    name_ko VARCHAR(20) NOT NULL,
 
-    cultivation_id BIGINT NOT NULL,
-
-    place VARCHAR(50),
-
-    location VARCHAR(50),
-
-    device_model VARCHAR(100),
-
-    sensor_type VARCHAR(30),
-
-    status VARCHAR(20) NOT NULL DEFAULT 'ONLINE',
-
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-
+    unit VARCHAR(10) NOT NULL
 );
 ```
 
-`cultivation_id`에는 FK를 걸지 않습니다(다른 서비스/DB의 데이터). 대신
-`idx_sensor_cultivation` 인덱스로 조회 성능을 확보합니다.
-
----
-
-## environment_setting
-
 ```sql
-CREATE TABLE environment_setting (
-
+CREATE TABLE sensor (
     id BIGSERIAL PRIMARY KEY,
 
     cultivation_id BIGINT NOT NULL,
 
-    type VARCHAR(20) NOT NULL,
+    device_eui VARCHAR(32) NOT NULL,
 
-    min DECIMAL(4,1) NOT NULL,
+    location VARCHAR(10),
 
-    max DECIMAL(4,1) NOT NULL,
+    location_detail VARCHAR(50),
 
-    unit VARCHAR(10),
+    device_model VARCHAR(100),
+
+    status VARCHAR(10) NOT NULL DEFAULT 'OFFLINE',
+
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
 
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_sensor_device_eui UNIQUE (device_eui),
 
-    CONSTRAINT chk_environment_type CHECK (type IN (
-        'TEMPERATURE', 'HUMIDITY', 'CO2', 'LIGHT'
-    ))
-
+    CONSTRAINT chk_sensor_status CHECK (status IN ('ONLINE', 'OFFLINE', 'ERROR'))
 );
 ```
 
-Cultivation DB에 있던 `fk_environment_cultivation FOREIGN KEY ... REFERENCES cultivation(id)
-ON DELETE CASCADE` 제약은 유지할 수 없습니다(교차 서비스). CASCADE 삭제는 아래 "관계"의
-`CultivationDeletedEvent` 구독으로 대체합니다.
+```sql
+CREATE TABLE sensor_type (
+    id BIGSERIAL PRIMARY KEY,
+
+    sensor_id BIGINT NOT NULL,
+
+    measurement_type_code VARCHAR(20) NOT NULL,
+
+    CONSTRAINT fk_sensor_type_sensor
+        FOREIGN KEY (sensor_id) REFERENCES sensor(id),
+
+    CONSTRAINT fk_sensor_type_measurement
+        FOREIGN KEY (measurement_type_code) REFERENCES measurement_type(code),
+
+    CONSTRAINT uk_sensor_type UNIQUE (sensor_id, measurement_type_code)
+);
+```
+
+```sql
+CREATE TABLE environment_setting (
+    id BIGSERIAL PRIMARY KEY,
+
+    cultivation_id BIGINT NOT NULL,
+
+    measurement_type_code VARCHAR(20) NOT NULL,
+
+    threshold_min NUMERIC(10,4) NOT NULL,
+
+    threshold_max NUMERIC(10,4) NOT NULL,
+
+    threshold_unit VARCHAR(10) NOT NULL,
+
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    updated_at TIMESTAMP,
+
+    CONSTRAINT fk_environment_setting_measurement
+        FOREIGN KEY (measurement_type_code) REFERENCES measurement_type(code)
+);
+```
+
+```sql
+CREATE TABLE mushroom_reference (
+    id BIGSERIAL PRIMARY KEY,
+
+    mushroom_type VARCHAR(20) NOT NULL,
+
+    mushroom_name_ko VARCHAR(50) NOT NULL,
+
+    mushroom_name_en VARCHAR(50) NOT NULL,
+
+    mushroom_scientific_name VARCHAR(50),
+
+    characteristics TEXT,
+
+    health_benefits TEXT,
+
+    cultivation_guide TEXT,
+
+    additional_info TEXT,
+
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    updated_at TIMESTAMP,
+
+    CONSTRAINT uk_mushroom_reference_type UNIQUE (mushroom_type)
+);
+```
+
+```sql
+CREATE TABLE mushroom_reference_threshold (
+    id BIGSERIAL PRIMARY KEY,
+
+    mushroom_reference_id BIGINT NOT NULL,
+
+    measurement_type_code VARCHAR(20) NOT NULL,
+
+    threshold_min NUMERIC(10,4) NOT NULL,
+
+    threshold_max NUMERIC(10,4) NOT NULL,
+
+    threshold_unit VARCHAR(10) NOT NULL,
+
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    updated_at TIMESTAMP,
+
+    CONSTRAINT fk_mushroom_reference_threshold_reference
+        FOREIGN KEY (mushroom_reference_id) REFERENCES mushroom_reference(id),
+
+    CONSTRAINT fk_mushroom_reference_threshold_measurement
+        FOREIGN KEY (measurement_type_code) REFERENCES measurement_type(code),
+
+    CONSTRAINT uk_mushroom_reference_threshold UNIQUE (mushroom_reference_id, measurement_type_code)
+);
+```
 
 ---
 
 # Index
 
-## sensor
-
 ```sql
 CREATE INDEX idx_sensor_cultivation
-ON sensor(cultivation_id);
+ON sensor(cultivation_id)
+WHERE is_deleted = FALSE;
 ```
+
+재배별 활성 센서 목록 조회에 사용하는 부분 인덱스입니다.
 
 ```sql
-CREATE INDEX idx_sensor_status
-ON sensor(status);
+CREATE INDEX idx_environment_setting_lookup
+ON environment_setting(cultivation_id, measurement_type_code, created_at DESC);
 ```
 
-device_eui가 PK이므로 별도 UNIQUE 인덱스는 필요하지 않습니다.
-
----
-
-## environment_setting
+"현재값" 조회(재배+항목 기준 최신 행)와 이력 조회 모두에 사용합니다.
 
 ```sql
-CREATE INDEX idx_environment_setting_cultivation_type
-ON environment_setting(cultivation_id, type, created_at DESC);
+CREATE INDEX idx_mushroom_reference_threshold_reference
+ON mushroom_reference_threshold(mushroom_reference_id);
 ```
 
-"재배의 각 항목별 현재값(최신 행)"을 조회하는 것이 가장 흔한 접근 패턴이라, `cultivation_id`
-+ `type` + `created_at DESC` 복합 인덱스 하나로 커버합니다.
-
-```sql
-SELECT DISTINCT ON (type) *
-FROM environment_setting
-WHERE cultivation_id = ?
-ORDER BY type, created_at DESC;
-```
-
----
-
-# 상태(Status)
-
-## sensor
-
-| 값 | 설명 |
-|-----|------|
-| ONLINE | 정상 |
-| OFFLINE | 연결 끊김 |
-| ERROR | 오류 |
-| MAINTENANCE | 점검 중 |
-
-`sensor.status`는 Rule Engine Service가 발행하는 `SensorErrorEvent`를 Sensor Service가
-구독해 갱신합니다. (기존에는 Cultivation Service가 구독했지만, `sensor` 테이블 소유권 이전과
-함께 구독 주체도 옮겨졌습니다.)
-
----
-
-# 데이터 생성 흐름
-
-## ① 센서 등록 (단건)
-
-Client가 재배 생성 이후 개별적으로 센서를 추가할 때 직접 Sensor Service를 호출합니다.
-
-```
-Client → Sensor Service
-
-↓
-
-cultivation_id 소유권 검증 (Cultivation Service OpenFeign 호출, GET /api/v1/cultivations/{cultivationId}/owner)
-
-↓
-
-sensor 생성
-
-↓
-
-RabbitMQ Publish (SensorRegisteredEvent)
-```
-
----
-
-## ② 센서 일괄 등록 (재배 생성과 함께, 내부용)
-
-Cultivation Service가 재배 생성 직후 `devices`를 한 번에 등록하기 위해 호출하는 내부용
-흐름입니다. 이 경우 소유권 검증은 생략합니다(호출 주체 자체가 이미 그 재배를 막 생성한
-Cultivation Service이므로).
-
-```
-Cultivation Service → Sensor Service (POST /api/v1/sensors/cultivations/{cultivationId}/batch)
-
-↓
-
-devices 각 항목으로 sensor 레코드 생성 (Sensor DB 자체 트랜잭션, all-or-nothing)
-
-↓
-
-RabbitMQ Publish (SensorRegisteredEvent, 디바이스별)
-
-↓
-
-Cultivation Service에 등록 결과 반환
-```
-
-Cultivation Service와 Sensor Service에 걸친 진짜 분산 트랜잭션은 아닙니다. 이 배치 등록이
-실패하면 Cultivation Service가 방금 생성한 cultivation을 보상 삭제(compensating delete)해
-사용자 관점에서는 여전히 all-or-nothing처럼 보이도록 합니다. (자세한 내용은
-[cultivation-api.md](../02_API/cultivation-api.md)의 "재배 생성" 참고)
-
----
-
-## ③ 환경 저장
-
-```
-Client → Sensor Service (PATCH /api/v1/sensors/cultivations/{cultivationId}/environment)
-
-↓
-
-cultivation_id 소유권 검증 (Cultivation Service OpenFeign 호출)
-
-↓
-
-수정된 항목마다 단일 목표값을 허용 오차만큼 확장하여 범위로 변환
-
-↓
-
-environment_setting에 항목별로 새 행 INSERT (수정되지 않은 항목은 기존 최신 행 유지)
-
-↓
-
-RabbitMQ Publish (EnvironmentRangeUpdatedEvent) → Rule Engine Service
-```
-
-단일값 → 범위 변환 기준(허용 오차)과 범위 → 단일값 역변환(중간값) 로직은 기존 Cultivation
-Service에 있던 것을 그대로 Sensor Service로 옮겼습니다. (자세한 내용은
-[sensor.md](../01_Domain/sensor.md) 참고)
-
----
-
-## ④ 재배 삭제에 따른 정리 (보상 삭제)
-
-```
-Cultivation Service
-
-↓
-
-재배 삭제 (cultivation 행 삭제, PostgreSQL 자체 CASCADE로 harvest/photo도 함께 삭제됨)
-
-↓
-
-RabbitMQ Publish (CultivationDeletedEvent)
-
-↓
-
-Sensor Service 구독
-
-↓
-
-sensor / environment_setting에서 해당 cultivation_id 행 전체 삭제
-```
-
-같은 DB 안에서의 `ON DELETE CASCADE`를 더 이상 쓸 수 없어 생긴 대체 경로입니다. 이벤트가
-유실되면 정리가 지연될 수 있습니다(추후 개발 예정: 주기적 재동기화 배치).
+버섯 하나의 전체 임계값 조회에 사용합니다.
 
 ---
 
 # 관계
 
 ```
-Cultivation Service (cultivation, 원본)
+sensor_type, environment_setting  (Sensor Service)
 
-    │  GET /api/v1/cultivations/{cultivationId}/owner (OpenFeign, 쓰기 요청마다 소유권 검증)
-    │  CultivationDeletedEvent (RabbitMQ, 재배 삭제 시 정리용)
-
+    │ measurement_type_code (같은 DB 내 실제 FK)
     ▼
+measurement_type
 
-Sensor Service (sensor, environment_setting)
 
-    │  SensorRegisteredEvent / SensorDeletedEvent (RabbitMQ)
+mushroom_reference_threshold (Sensor Service)
 
+    │ mushroom_reference_id, measurement_type_code (같은 DB 내 실제 FK)
     ▼
+mushroom_reference, measurement_type
 
-DatasourceGenerator (sensor_cache, 메모리, 읽기 전용)
 
+sensor, environment_setting (Sensor Service)
 
-Sensor Service (environment_setting)
-
-    │  EnvironmentRangeUpdatedEvent (RabbitMQ)
-
+    │ cultivation_id (소프트 참조)
     ▼
-
-Rule Engine Service (Redis 캐시 write-through)
-
-
-Sensor Service (sensor.status)
-
-    ▲
-
-    │  SensorErrorEvent (RabbitMQ, Rule Engine Service 발행)
+Cultivation Service
 ```
+
+Sensor Service는 다른 서비스와 데이터베이스를 공유하지 않습니다. `cultivation_id`를 통해서만
+Cultivation Service를 간접 참조합니다. `mushroom_reference`/`measurement_type`은 다른
+서비스 데이터를 참조하지 않는 전역 시드 데이터입니다.
+
+---
+
+# 다른 서비스와의 연관
+
+`cultivation` 삭제 시 같은 DB 안이었다면 `ON DELETE CASCADE`로 자동 정리됐겠지만, DB가
+분리되어 있어 Cultivation Service가 발행하는 `CultivationDeletedEvent`를 Sensor Service가
+구독해 해당 `cultivation_id`의 `sensor`/`environment_setting` 행을 직접 삭제합니다(보상
+정리).
 
 ---
 
 # 고려 사항
 
-- `sensor`/`environment_setting`은 원래 Cultivation DB에 있었지만, 센서 관련 책임(측정값 저장/조회 + 장치 메타데이터 + 목표 환경)을 Sensor Service 하나로 모으기 위해 이전했습니다.
-- `cultivation_id`는 두 테이블 모두에서 다른 서비스(Cultivation Service)의 데이터를 가리키는 순수 참조값이며, DB 레벨 FK를 걸지 않습니다. 이는 이 프로젝트에서 이미 `cultivation.user_id`(Auth Service 참조)가 따르던 패턴과 동일합니다.
-- 같은 DB 안에 있을 때 가능했던 `ON DELETE CASCADE`는 더 이상 불가능하며, `CultivationDeletedEvent` 구독을 통한 보상 삭제로 대체했습니다. 이벤트 기반이라 즉시성은 CASCADE보다 약간 떨어질 수 있습니다.
-- 쓰기 작업(센서 등록/삭제, 환경 저장)마다 Cultivation Service에 소유권을 확인하는 OpenFeign 호출이 추가로 필요합니다. 다만 "재배 생성과 함께 센서 일괄 등록"하는 경우는 호출 주체가 Cultivation Service 자신이므로 이 검증을 생략합니다.
-- environment_setting은 단일 목표값이 아닌 범위(min~max)로 저장합니다. Rule Engine Service가 범위를 벗어날 때만 장치를 제어하도록 하여 불필요한 On/Off를 줄이기 위함입니다.
-- Environment Setting은 항목(TEMPERATURE/HUMIDITY/CO2/LIGHT)별로 여러 행이 쌓이며, UPDATE 없이 항상 INSERT만 합니다. 데이터가 무한히 쌓이는 이력성 테이블이라, 운영 단계에서는 오래된 이력에 대한 보관 주기 정책이 필요할 수 있습니다(추후 개발 예정).
-- sensor.device_eui는 대리키가 아닌 사용자가 입력하는 장치 고유 식별자를 그대로 PK로 사용합니다.
-- 별도 datasource 테이블/엔티티는 존재하지 않습니다. 위치 정보(place/location)는 센서 레코드에 직접 저장합니다.
-- 센서가 측정한 "값"(시계열)은 이 DB가 아닌 InfluxDB에서 관리합니다. 이 DB는 장치 메타데이터와 목표 환경(위험 한계값)만 다룹니다.
+- `measurement_type`을 별도 참조 테이블로 뺀 이유는 온도/습도/CO₂/조도라는 같은 값 집합이
+  `sensor_type`/`environment_setting`/`mushroom_reference_threshold` 세 곳에서 자유
+  문자열로 반복되면 값이 서로 어긋날 위험(예: 한쪽은 "온도", 다른 쪽은 "TEMPERATURE")이
+  있기 때문입니다. 이제 새 측정 항목을 추가하려면 `measurement_type`에 행 하나만 추가하면
+  됩니다.
+- `cultivation.mushroom_type` ↔ `mushroom_reference.mushroom_type`은 둘 다 같은 코드
+  문자열(예: `OYSTER`)을 쓰는 것으로 연결 방식을 확정했습니다. 버섯 종류가 공공데이터
+  기준 5종으로 고정되어 있어, 코드가 곧 자연키 역할을 합니다.
+- "재배 생성 시 환경 추천"은 Cultivation Service가 이 `mushroom_type` 코드로 Sensor
+  Service를 OpenFeign 호출해 `mushroom_reference`/`mushroom_reference_threshold`를
+  조회하는 방식으로 처리합니다.

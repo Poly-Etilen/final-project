@@ -62,18 +62,16 @@
 
 ### 개발 대상
 
-9개 서비스(API Gateway 포함)로 구성합니다. Auth+User는 하나의 서비스로 통합 개발하고,
-Rule Engine과 Sensor는 책임을 분리해 별도 서비스로 개발합니다.
+8개 서비스(API Gateway 포함)로 구성합니다.
 
 - API Gateway
-- Auth Service (기존 Auth+User 통합)
+- Auth Service
 - Cultivation Service
 - AI Service
-- Embedding Service
 - Rule Engine Service (MQTT 수신/Collector, 검증, 규칙 평가, 자동 제어, 센서 오류 감지)
-- Sensor Service (측정값 저장/조회, 통계·차트, 주간 리포트 집계)
+- Sensor Service (센서 장치/목표 환경/버섯 참조 데이터 관리, 측정값 저장/조회, 통계·차트, 주간 리포트 집계)
 - Notification Service
-- DatasourceGenerator (기존 Datasource Service 리네임)
+- DatasourceGenerator
 
 ---
 
@@ -85,16 +83,14 @@ AI 기반 기능을 구현합니다.
 
 ### 작업 내용
 
-- Embedding 생성
-- Vector Search
-- RAG 구현
-- AI 챗봇
+- RAG (참조 데이터/인사이트 사례 직접 조회 기반, 임베딩·벡터 검색 없음)
+- AI 챗봇 (웹/앱 + Telegram/Discord)
 - Vision 모델 연동 (생육 사진 분석)
-- 생육 분석
-- AI 리포트
+- 생육 분석 / 일일 피드백 / 인사이트
+- AI 주간 리포트
 
-환경 추천(mushroom_reference 참조 테이블 조회)은 AI가 아닌 Cultivation Service의 기능이므로
-4단계(핵심 서비스 개발)에서 함께 구현합니다.
+환경 추천(`mushroom_reference` 참조 테이블 조회)은 AI가 아닌 Cultivation/Sensor
+Service의 기능이므로 4단계(핵심 서비스 개발)에서 함께 구현합니다.
 
 ---
 
@@ -122,13 +118,12 @@ AI 기반 기능을 구현합니다.
 
 ### 작업 내용
 
-- 로그인 화면
+- 로그인 화면 (LOCAL + 구글)
 - 대시보드
 - 재배 생성 (환경 추천 포함)
 - 실시간 차트
 - 생육 사진 업로드/분석 화면
-- AI 챗봇
-- AI 리포트
+- AI 챗봇 / AI 리포트 / 일일 피드백 / 인사이트
 
 ---
 

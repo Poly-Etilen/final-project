@@ -9,42 +9,36 @@
 - Spring Data JPA
 - Spring AI
 
-Spring MVC / Spring Security / Spring Data JPA / Spring AI는 별도 버전을 명시하지 않고
-Spring Boot 4.0.7이 관리하는 BOM(Bill of Materials) 버전을 그대로 따릅니다.
+Spring MVC / Spring Security / Spring Data JPA / Spring AI는 별도 버전을 명시하지
+않고 Spring Boot 4.0.7이 관리하는 BOM(Bill of Materials) 버전을 그대로 따릅니다.
 
 ---
 
 ## Database
 
-### PostgreSQL
+### PostgreSQL (서비스별 전용 DB)
 
-- 사용자 정보
-- 재배 정보
-- 센서 장치 정보 (목표 환경/위험 한계값 이력 포함)
-- 알림 이력
-- 챗봇 대화 이력
-- 생육 분석 이력
-- 일일 피드백 이력
-
-> ℹ️ **변경 이력**: 목표 환경 설정 이력(`environment_setting`)은 원래 재배 정보와 같은 DB에 있었지만, 팀 회의 결과 Sensor Service DB로 이관되어 이제 센서 장치 정보와 함께 저장됩니다. (자세한 내용은 [architecture.md](./architecture.md), [README.md](../README.md)의 결정 사항 #24 참고)
+- 사용자/인증 정보 (Auth DB)
+- 재배/수확/사진 정보 (Cultivation DB)
+- 센서 장치/목표 환경/버섯 참조 정보 (Sensor DB)
+- 알림 이력 (Notification DB)
+- 챗봇 대화/생육 분석/일일 피드백/인사이트 이력 (AI DB)
 
 ### Redis
 
-- Refresh Token
-- 이메일 인증
-- AI 응답 캐시
+- Refresh Token / 이메일 인증
+- AI 응답·생육 분석·리포트·인사이트·버섯 가이드 캐시
+- 목표 환경 범위 캐시
+- 최신 센서 데이터
 
 ### InfluxDB
 
 - 센서 시계열 데이터 저장
 
-### Elasticsearch
+### Photo Storage (MinIO / Local)
 
-- 버섯 재배 환경 임베딩(Vector Search)
-
-### MinIO
-
-- 사용자가 업로드한 생육 사진(이미지) 저장
+- 사용자가 업로드한 생육 사진 저장. `storage_type`으로 MinIO/로컬을 구분해
+  추상화합니다.
 
 ---
 
@@ -52,8 +46,9 @@ Spring Boot 4.0.7이 관리하는 BOM(Bill of Materials) 버전을 그대로 따
 
 - Spring AI
 - OpenAI API (또는 Gemini API)
-- RAG (Retrieval-Augmented Generation)
-- Embedding
+- RAG (버섯 참조 데이터/인사이트 사례를 정확한 값 매칭으로 직접 조회해 LLM 컨텍스트로
+  사용 — 버섯 종류가 5종 고정이고 검색 조건이 정확한 값/범위 필터라 별도의 임베딩
+  모델이나 벡터 검색은 사용하지 않습니다)
 - Vision 모델 (생육 사진 분석 - 균사 성장률/갓 크기/색상/병충해 판별)
 
 ---
@@ -76,7 +71,8 @@ Spring Boot 4.0.7이 관리하는 BOM(Bill of Materials) 버전을 그대로 따
 - Eureka Server
 - OpenFeign
 
-Spring Cloud 2025.1.x (Oakwood) 릴리스 트레인 사용 — Spring Boot 4.0.x와 호환되는 버전입니다.
+Spring Cloud 2025.1.x (Oakwood) 릴리스 트레인 사용 — Spring Boot 4.0.x와 호환되는
+버전입니다.
 
 ---
 
@@ -110,27 +106,19 @@ Spring Cloud 2025.1.x (Oakwood) 릴리스 트레인 사용 — Spring Boot 4.0.x
 
 CI/CD Pipeline
 
+```
 GitHub Push
-
 ↓
-
 GitHub Actions
-
 ↓
-
 Maven Build
-
 ↓
-
 Docker Image Build
-
 ↓
-
 Docker Registry
-
 ↓
-
 Kubernetes Rolling Update
+```
 
 ---
 

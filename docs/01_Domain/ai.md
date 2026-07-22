@@ -2,330 +2,99 @@
 
 ## 역할
 
-AI Service는 LLM과 RAG(Retrieval-Augmented Generation)를 활용하여 사용자에게 지능형 서비스를 제공합니다.
-
-센서 데이터를 분석하여 생육 상태를 예측하며, AI 리포트와 챗봇 기능을 제공합니다.
-
-> ℹ️ **변경 이력**: 재배 환경 추천은 원래 AI Service가 Embedding/Vector Search/LLM을 통해
-> 생성했지만, 공공데이터 기준 버섯 종류가 5가지로 고정되어 있어 항상 같은 값이 나오는 조회에는
-> AI가 불필요하다고 판단해 Cultivation Service의 `mushroom_reference` 참조 테이블 조회로
-> 이전했습니다. AI Service는 더 이상 환경 추천을 담당하지 않습니다.
-
-> ℹ️ **변경 이력**: 재배 생성 직후 사용자에게 버섯 효능/재배 시 주의사항을 자연어로 보여주는
-> "버섯 가이드" 기능이 추가되었습니다. 환경 추천(수치, 범위)과 달리 이 기능은 사람이 읽기 좋은
-> 설명 문서를 생성하는 것이 목적이라 LLM을 그대로 활용하기로 했습니다. 다만 버섯 종류가
-> 5가지로 고정되어 있는 것은 환경 추천 때와 동일하므로, 재배(cultivation)가 아닌
-> **버섯 종류(mushroomType) 기준으로 캐싱**하여 동일 종류에 대해 매번 LLM을 호출하지 않도록
-> 했습니다.
-
-> ℹ️ **변경 이력**: `mushroom_reference`(Cultivation DB)에 특성/효능/재배 가이드/추가 정보
-> 원문 텍스트가 추가되면서, "버섯 가이드"는 이 원문을 무(無)에서 생성하지 않고 **RAG 컨텍스트로
-> 활용**합니다. AI Service가 Cultivation Service를 OpenFeign으로 호출해(`GET
-> /api/v1/mushroom-references/{mushroomType}`) 원문 텍스트를 가져온 뒤, LLM이 이를 참고해
-> 더 자연스러운 문장의 `benefits`/`precautions`로 다듬어 응답합니다. 원문을 그대로 반환하지
-> 않는 이유는, 공공데이터 원문이 항목별로 파편화되어 있어 사용자에게는 자연어로 통합된 설명이
-> 더 읽기 좋기 때문입니다.
-
-> ℹ️ **변경 이력**: AI 챗봇의 대화 이력을 조회하는 기능이 추가되었습니다. 기존에는 `ai:{hash}`
-> Redis 캐시(동일 질문 재요청 시 LLM 재호출 방지용)만 있어서 사용자가 이전 대화를 다시 볼 수
-> 없었습니다. 이번 변경으로 매 질의응답을 `chat_message` 테이블에 저장하며, AI Service가
-> 처음으로 PostgreSQL DB를 갖게 되었습니다. `ai:{hash}` 캐시는 역할이 겹치지 않아 그대로
-> 유지합니다. (자세한 내용은 [ai-db.md](../03_Database/ai-db.md) 참고)
-
-> ℹ️ **변경 이력**: 월간 리포트를 폐기했습니다. 버섯 재배 기간이 한 달을 넘지 않아 "월간"
-> 단위가 의미가 없다고 판단했습니다. 또한 AI 리포트 생성 방식을 "사용자 요청 시 그 자리에서
-> 생성"(pull)에서 **Sensor Service의 Weekly Scheduler가 먼저 집계 데이터를 전달하고 AI
-> Service가 미리 리포트를 만들어 두는 방식**(push)으로 재정리했습니다. 두 방식이 문서에 섞여
-> 있어 서로 모순됐던 부분을 정리한 것입니다. (자세한 내용은
-> [ai-report.md](../04_sequence/ai-report.md) 참고)
-
-> ℹ️ **변경 이력**: "일일 피드백" 기능이 추가되었습니다. 사용자가 재배 환경(온도 등)을
-> 수정했을 때, 그 수정이 실제로 생육에 긍정적이었는지를 매일 알려주는 기능입니다. 이를 위해
-> AI Service에 `growth_record`(생육 분석 결과 이력), `daily_feedback`(일일 피드백 결과)
-> 테이블이 추가되었고, Daily Scheduler가 매일 재배별로 환경 변경 이력(당시 Cultivation
-> Service의 `environment_setting`)과 생육 추이(`growth_record`)를 비교해 피드백을 생성합니다.
-> 사용자가 전날 사진을 찍지 않았다면 비교할 데이터가 없으므로, 그 경우에도 피드백 자체는
-> 생성하되 고정된 안내 문구를 남깁니다. (자세한 내용은 [ai-db.md](../03_Database/ai-db.md),
-> [daily-feedback.md](../04_sequence/daily-feedback.md) 참고)
-
-> ℹ️ **변경 이력**: "인사이트" 기능이 추가되었습니다. "일일 피드백"이 **자기 자신**의 환경
-> 변경 이력과 생육 추이를 비교하는 기능이라면, 인사이트는 **같은 버섯 종류 + 유사한(오차 범위
-> 내) 온도로 재배했던 다른 사용자들**의 완료된 재배 사례를 바탕으로 현재 내 재배 상태를
-> 피드백해주는 기능입니다. 매일 00시에 Insight Batch Scheduler가 돌면서 Cultivation Service에
-> 아직 임베딩되지 않은 수확(harvest) 건수를 조회하고, 전체 합산 20건 이상이면 그 배치를
-> Embedding Service로 보내 임베딩 후 Elasticsearch(`cultivation_insight` 인덱스)에 저장합니다.
-> 조회는 이 배치 적재와 별개로, 사용자가 요청한 시점에만(on-demand) 이루어집니다 — AI Service가
-> Embedding Service를 통해 Elasticsearch에서 유사 사례를 검색하고, LLM이 이를 요약해 보여줍니다.
-> (자세한 내용은 [insight.md](../04_sequence/insight.md),
-> [cultivation-db.md](../03_Database/cultivation-db.md)의 `harvest.is_embedded`,
-> [elasticSearch.md](../03_Database/elasticSearch.md)의 `cultivation_insight` 참고)
-
-> ℹ️ **변경 이력**: 팀 회의 결과 `environment_setting` 테이블이 Cultivation Service에서
-> Sensor Service로 완전히 이관되었습니다. Daily Scheduler의 환경 변경 이력 조회, 인사이트
-> 배치의 환경 평균 조회, 인사이트 on-demand 조회의 현재 재배 환경 평균 조회가 모두
-> Cultivation Service 대신 Sensor Service를 호출하도록 바뀌었습니다. 특히 인사이트 배치
-> 스케줄러는 이제 Cultivation Service(미임베딩 수확 목록)와 Sensor Service(환경 평균
-> 일괄 조회, `POST /api/v1/sensors/environment-averages`)를 각각 호출해 결과를 조합합니다.
-> (자세한 내용은 [sensor.md](./sensor.md), [daily-feedback.md](../04_sequence/daily-feedback.md),
-> [insight.md](../04_sequence/insight.md), [README.md](../README.md)의 결정 사항 #24 참고)
+AI Service는 LLM과 Vision 모델을 활용해 지능형 기능을 제공하는 서비스입니다. 생육 사진
+분석, 자연어 챗봇(웹/앱/Telegram/Discord), 주간 리포트, 일일 피드백, "인사이트"(타인의
+유사 재배 사례 기반 피드백), 버섯 가이드(효능/주의사항)를 담당합니다.
 
 ---
 
 # 책임
 
-- AI 생육 분석
-- AI 챗봇
-- 일일 피드백 생성
-- 인사이트 배치 임베딩 적재 (00시 스케줄러)
-- 인사이트 조회 (타인의 유사 재배 사례 기반)
-- AI 리포트 생성
+- 생육 사진 Vision 분석
+- AI 챗봇 (APP/Telegram/Discord 다채널, 대화 이력 저장/조회)
+- 주간 리포트 생성 (Weekly Scheduler push 기반)
+- 일일 피드백 생성 (Daily Scheduler)
+- 인사이트 사례 적재(수확 완료 시점) 및 조회
 - 버섯 가이드(효능/주의사항) 생성
-- 프롬프트 관리
-- AI 응답 캐싱
 
 ---
 
 # 주요 기능
 
-## AI 생육 분석
+## AI 생육 분석 (Vision)
 
-환경 데이터만으로 추정하지 않고, 사용자가 직접 촬영하여 업로드한 사진을 Vision 모델로 분석하여
-실제 생육 상태를 판단합니다.
-
-카메라 센서가 자동으로 촬영하는 방식이 아니라, 사용자가 앱/웹에서 사진을 찍어 업로드하면
-그 사진을 AI가 학습된 기준(성장 단계별 학습 데이터)과 비교하여 분석하는 방식입니다.
-
-Vision 모델은 AI Service 내부에 포함되며, LLM과는 별도로 동작합니다.
-
-### 분석 흐름
-
-1. Cultivation Service가 사용자로부터 업로드받은 사진의 URL을 AI Service에 전달합니다.
-
-사진 원본은 Cultivation Service가 MinIO에 저장한 상태이며, AI Service는 전달받은 URL로 이미지를 조회합니다.
-
----
-
-2. AI Service의 Vision 모델이 사진을 분석합니다.
-
-Vision 모델은 사전에 다양한 성장 단계의 사진으로 학습되어 있으며,
-입력된 사진을 학습된 패턴과 비교하여 아래 지표를 산출합니다.
-
-```json
-{
-    "myceliumGrowthRate":82,
-    "capSize":"중(3.2cm)",
-    "colorStatus":"정상",
-    "diseaseStatus":"정상"
-}
-```
-
-분석 항목
-
-- 균사 성장률 : 균사가 배지를 덮은 비율
-- 갓 크기 : 버섯 갓의 지름
-- 색상 분석 : 정상 / 변색 / 갈변 등 색상 상태
-- 병충해 분석 : 정상 / 의심 / 감염 여부
-
----
-
-3. AI Service가 4가지 지표를 종합하여 생육 점수를 계산합니다.
-
-```
-생육 점수 = 균사 성장률 40% + 갓 크기 점수 30% + 색상 점수 15% + 병충해 점수 15%
-```
-
-병충해가 감지된 경우 생육 점수를 별도로 감점합니다.
-
----
-
-4. 성장 단계(균사기 / 자실체 형성기 / 성장기 / 수확 적기)를 기준으로 예상 수확 시기를 추정합니다.
-
----
-
-5. LLM은 Vision 모델이 산출한 지표(생육 점수, 성장 단계, 병충해 여부)를 입력받아
-   결과를 해석하는 자연어 설명과 개선 방안만 생성합니다.
-   지표 자체를 새로 추정하지 않습니다.
-
-6. 분석 결과는 `ai:{cultivationId}:analysis` Redis 캐시(TTL 6시간, 빠른 재조회용)에 저장되는
-   것과 별개로, `growth_record` 테이블(PostgreSQL)에도 한 행으로 영구 저장됩니다. Redis 캐시는
-   TTL이 지나면 사라지지만, `growth_record`는 "일일 피드백"이 여러 날짜의 생육 추이를 비교하는
-   데 계속 사용되므로 만료되지 않습니다.
-
-### 제공 정보
-
-- 생육 점수
-- 균사 성장률
-- 갓 크기
-- 색상 상태
-- 병충해 여부
-- 성장 단계
-- 예상 수확 시기
-- 환경 개선 사항 (LLM 생성)
-
----
-
-## 버섯 가이드 생성 (효능/주의사항)
-
-재배를 생성한 직후, 선택한 버섯 종류의 효능과 재배 시 주의사항을 자연어 문서로 보여줍니다.
-
-`mushroom_reference.description`(짧은 한 줄 참고 문구, Cultivation Service가 재배 생성 응답에
-그대로 포함)과는 별개입니다. 버섯 가이드는 그보다 훨씬 자세한 설명(효능, 주의사항)을 LLM으로
-생성하는 별도 기능이며, Client가 재배 생성 이후 AI Service를 직접 호출해서 받습니다
-(Cultivation Service를 거치지 않습니다. 다만 AI Service는 응답을 만들기 위해 내부적으로
-Cultivation Service를 OpenFeign으로 호출합니다).
-
-`mushroom_reference`에 저장된 characteristics(특성)/health_benefits(효능)/cultivation_guide
-(재배 가이드)/additional_info(추가 정보) 원문을 Cultivation Service로부터 가져와 LLM
-프롬프트의 RAG 컨텍스트로 사용합니다. LLM은 이 원문을 그대로 반환하지 않고, 자연스러운 문장의
-`benefits`/`precautions`로 재구성합니다.
-
-버섯 종류는 공공데이터 기준 5가지로 고정되어 있어 같은 종류라면 항상 같은 내용이 나오므로,
-`mushroomType` 기준으로 캐싱해 동일 종류에 대한 반복 LLM 호출을 피합니다. (재배 환경 추천을
-AI에서 뺀 이유와 같은 문제이지만, 이번에는 수치가 아닌 "설명 문서"를 만드는 것이라 LLM을
-그대로 사용하기로 했습니다.)
-
-### 제공 정보
-
-- 효능 (buffs)
-- 재배 시 주의사항 (precautions)
+사용자가 업로드한 사진을 Vision 모델로 분석해 생육 점수/균사 성장률/갓 크기/색상/병충해/
+성장 단계/예상 수확일을 반환합니다. 분석 결과는 Redis(`ai:{cultivationId}:analysis`,
+TTL 6시간)로 빠른 재조회를 지원하는 동시에 `growth_record`에 영구 저장해 일일 피드백의
+추이 비교에 사용합니다.
 
 ---
 
 ## AI 챗봇
 
-사용자는 자연어로 재배 관련 질문을 할 수 있습니다.
+사용자는 자연어로 재배 관련 질문을 할 수 있습니다. 매 발화(질문/응답)는 `chat_log`에
+한 행씩 저장됩니다.
 
-예시
+- **APP**: Client가 Bearer JWT로 인증된 `POST /ai/chat`을 직접 호출합니다. `userId`는
+  JWT에서, `cultivationId`는 요청 파라미터로 지정합니다(선택).
+- **Telegram/Discord**: 사용자가 봇에게 메시지를 보내면 웹훅으로 전달됩니다. AI Service는
+  발신자 Chat ID로 Notification Service의 `notification_endpoint`를 조회해
+  `cultivationId`를 알아냅니다(알림 채널이 재배 단위로 등록되므로). 이 경로로는 개별
+  사용자를 특정할 수 없어 `user_id`는 NULL로 저장되지만, 대신 항상 특정 재배 맥락(Sensor
+  데이터 조회 포함)에서 답변할 수 있습니다. 매칭되는 endpoint가 없으면 "먼저 이 채널을
+  재배에 등록해주세요" 안내로 응답합니다.
 
-- 왜 성장이 느린가요?
-- 현재 환경은 적절한가요?
-- 언제 수확하면 좋을까요?
-- 생산량을 늘리려면 어떻게 해야 하나요?
+답변 생성 시 Sensor Service에서 현재 환경/통계를 조회하고, 필요하면 같은 호출로 해당
+재배의 버섯 종류에 맞는 `mushroom_reference` 텍스트(효능/재배 가이드)를 함께 받아 LLM
+컨텍스트로 사용합니다. 버섯 종류가 5종으로 고정되어 있어 `mushroomType`으로 정확히
+일치하는 한 건만 조회하면 되므로, 별도의 유사도 검색 없이 직접 조회로 충분합니다.
 
-매 질의응답은 `chat_message` 테이블에 저장됩니다.
+동일 질문 반복 호출을 줄이기 위해 Redis(`ai:{hash}`, TTL 24시간)에 응답을 캐싱합니다.
 
 ---
 
-## AI 챗봇 대화 이력 조회
+## 주간 리포트
 
-특정 재배에 대해 사용자가 챗봇과 나눈 이전 질문/답변을 최신순으로 조회합니다.
+Sensor Service의 Weekly Scheduler가 매주 집계 데이터를 먼저 전달(push)하면, AI Service가
+그 자리에서 리포트를 생성해 Redis(`report:{cultivationId}:weekly`, TTL 24시간)에 저장한 뒤
+`WeeklyReportCompletedEvent`를 발행합니다. 재배 기간이 한 달을 넘지 않아 월간 리포트는
+제공하지 않습니다.
 
 ---
 
 ## 일일 피드백
 
-사용자가 재배 환경(온도/습도/CO₂/조도)을 직접 수정했을 때, 그 수정이 생육에 실제로 도움이
-됐는지를 매일 알려주는 기능입니다. 예를 들어 mushroom_reference의 추천 온도보다 사용자가
-임의로 온도를 높였는데, 그 이후 생육 점수가 개선되는 추세라면 이를 짚어줍니다.
-
-Daily Scheduler가 매일 재배별로 아래 두 데이터를 비교합니다.
-
-- `growth_record`(AI Service 자체 DB): 최근 며칠간의 생육 분석 결과 추이
-- `environment_setting`(Sensor Service): 최근 환경 변경 이력
-
-사진을 찍지 않아 그날의 `growth_record`가 없으면 비교할 데이터가 없으므로, LLM을 호출하지
-않고 "전날 사진이 없어 피드백을 남길 수 없습니다"라는 고정 문구로 피드백을 생성합니다. 이
-경우에도 그날의 `daily_feedback` 행 자체는 생성됩니다(건너뛰지 않음).
-
-### 제공 정보
-
-- 피드백 문장 (환경 변경과 생육 추이의 상관관계, 또는 사진 없음 안내)
-- 대상 날짜
-- 비교 데이터 존재 여부
+사용자가 환경(온도/습도/CO₂/조도)을 직접 수정했을 때, 그 수정이 생육에 실제로 도움이
+됐는지 매일 알려주는 기능입니다. Daily Scheduler가 매일 재배별로 `growth_record`(생육 추이)와
+Sensor Service의 `environment_setting`(환경 변경 이력)을 비교해 LLM으로 피드백을 생성하고
+`daily_feedback`에 저장합니다. 사진을 찍지 않아 비교할 `growth_record`가 없으면 LLM을
+호출하지 않고 고정 문구로 피드백을 생성합니다(이 경우도 `daily_feedback` 행은 생성됨).
 
 ---
 
-## 일일 피드백 조회
+## 인사이트
 
-특정 재배에 대해 지금까지 생성된 일일 피드백을 최신순으로 조회합니다.
+같은 버섯 종류 + 유사한 온도로 재배했던 타인의 사례를 바탕으로 현재 재배 상태를
+피드백하는 기능입니다. 데이터 적재(수확 완료 시점)와 조회(on-demand)를 분리합니다.
 
----
-
-## 인사이트 배치 임베딩 적재
-
-일일 피드백이 "내 재배의 어제와 오늘"을 비교한다면, 인사이트는 "나와 비슷한 조건으로 재배한
-**다른 사람들**"의 완료된 사례를 바탕으로 피드백을 줍니다. 이를 위해서는 먼저 완료된 재배들을
-검색 가능한 형태로 Elasticsearch에 쌓아두어야 하며, 그 적재를 담당하는 것이 Insight Batch
-Scheduler입니다.
-
-매일 00시,
-
-1. Cultivation Service에 아직 임베딩되지 않은 수확(harvest) 건수를 조회합니다
-   (`GET /api/v1/harvests/unembedded-count`).
-2. 전체 사용자를 합산한 값이 20건 이상이면, 그 목록 전체를 가져옵니다
-   (`GET /api/v1/harvests/unembedded`). 20건 미만이면 이번 배치는 건너뛰고 다음 날 다시 확인합니다.
-3. 목록의 cultivationId들을 모아 Sensor Service에 환경 평균을 일괄 조회합니다
-   (`POST /api/v1/sensors/environment-averages`). 기간 가중 평균 온도/습도/CO₂/조도를 받습니다.
-4. 각 건에 대해 AI Service 자신의 `growth_record`에서 생육 점수(마지막 분석 결과)를 조회해 합칩니다.
-5. 조합한 데이터(버섯 종류, 기간 가중 평균 온도/습도/CO₂/조도, 생육 점수, 수확량)를 Embedding
-   Service로 보내 임베딩 및 Elasticsearch 저장을 요청합니다.
-6. 저장에 성공하면 Cultivation Service에 해당 건들을 임베딩 완료로 표시하도록 요청합니다
-   (`PATCH /api/v1/harvests/embedded`).
-
-> ℹ️ **변경 이력**: 환경 평균 조회(3번)는 원래 `GET /api/v1/harvests/unembedded` 응답에
-> Cultivation Service가 미리 계산해서 포함해주던 필드였습니다. `environment_setting`이
-> Sensor Service로 이관되면서 더 이상 Cultivation Service가 계산할 수 없게 되어, 별도
-> 배치 조회 API 호출로 분리했습니다. N+1 호출을 피하기 위해 cultivationId 목록을 한 번에
-> 보내는 배치 엔드포인트를 사용합니다.
-
-이 배치는 "매일 다시 전체를 훑어 재임베딩"하는 방식이 아니라, "임계치(20건)에 도달한 만큼만
-임베딩하고 카운터가 다시 쌓이길 기다리는" 방식입니다. 하루에 여러 번 임계치를 넘을 수도, 며칠간
-한 번도 안 넘을 수도 있습니다.
-
-AI Service가 이 배치의 오케스트레이터 역할을 하지만, 임베딩 계산과 Elasticsearch 저장 자체는
-Embedding Service의 책임입니다. AI Service는 Elasticsearch를 직접 호출하지 않습니다(기존
-버섯 가이드 RAG, 챗봇 유사 사례 검색과 동일한 원칙).
-
-"임베딩되었는지 여부"는 AI Service가 별도로 추적(워터마크)하지 않고, Cultivation Service가
-`harvest.is_embedded` 플래그로 소유합니다. AI Service는 단순 조회/갱신만 합니다.
+- Cultivation Service가 수확을 기록하면 발행하는 `HarvestCompletedEvent`를 AI Service가
+  구독해, 그 수확의 재배에 대한 환경 평균(Sensor Service 조회)과 최근 생육 점수
+  (`growth_record` 자체 조회)를 묶어 AI DB의 `insight` 테이블에 한 건 저장합니다. 별도
+  배치나 임계치 없이 수확이 기록될 때마다 바로 반영됩니다.
+- 사용자 조회(`GET /ai/insight`)는 요청 시점에 Redis 캐시 미스 시에만 Sensor
+  Service(현재 재배의 환경 평균 조회) + 자체 DB의 `insight` 테이블 검색(버섯 종류 정확히
+  일치 + 온도 오차 범위, SQL 필터) + LLM 요약을 거칩니다. 사례 수가 많지 않고 검색
+  조건이 정확한 값 매칭/범위 비교라서, 별도의 벡터 검색 없이 인덱스가 걸린 SQL 조회로
+  충분합니다.
 
 ---
 
-## 인사이트 조회
+## 버섯 가이드
 
-사용자가 특정 재배에 대해 인사이트를 요청하면(사용자 요청 시점, on-demand — 스케줄링/푸시가
-아님), 같은 버섯 종류이면서 유사한(오차 범위 내) 온도로 재배했던 **타인의 완료된 재배 사례**를
-찾아 현재 내 재배 상태에 대한 피드백을 생성합니다.
-
-1. Cultivation Service에서 재배의 버섯 종류를 조회합니다 (`GET /cultivations/{cultivationId}`).
-2. Sensor Service에서 현재 재배의 환경 평균(기간 가중 평균)을 조회합니다
-   (`GET /api/v1/sensors/cultivations/{cultivationId}/environment-average`). 재배가 아직
-   진행 중이어도 지금까지의 평균으로 조회할 수 있습니다.
-3. Embedding Service에 버섯 종류 + 온도 오차 범위를 조건으로 유사 사례 검색을 요청합니다
-   (Elasticsearch `cultivation_insight` 인덱스 검색).
-4. 매칭된 사례들(평균 환경값, 생육 점수, 수확량)을 LLM에 전달해 자연어 인사이트로 요약합니다.
-5. 결과를 Redis에 캐시하고(`ai:{cultivationId}:insight`) 반환합니다.
-
-> ℹ️ **변경 이력**: 환경 평균과 버섯 종류를 함께 반환하던 Cultivation Service의 단일
-> 엔드포인트(`GET /api/v1/cultivations/{cultivationId}/environment-average`)가
-> `environment_setting` 이관과 함께 사라지면서, 두 값을 각각 Cultivation Service(버섯 종류)와
-> Sensor Service(환경 평균)에서 따로 조회하도록 나뉘었습니다.
-
-유사 사례가 하나도 없으면(예: 아직 그 버섯 종류의 완료된 재배가 20건 미만이라 임베딩된 데이터가
-없는 경우) LLM을 호출하지 않고 "아직 비교할 수 있는 유사 사례가 충분하지 않습니다"라는 고정
-문구로 응답합니다.
-
-### 제공 정보
-
-- 인사이트 요약 문장 (유사 사례 대비 내 재배 상태 해석)
-- 비교에 사용된 유사 사례 수
-- 대상 재배 ID
-
----
-
-## AI 리포트
-
-Sensor Service의 Weekly Scheduler가 집계한 주간 데이터를 전달받아 AI 리포트를 생성합니다.
-사용자가 요청하는 시점이 아니라, Scheduler가 매주 먼저 리포트를 만들어 둡니다(push).
-재배 기간이 한 달을 넘지 않아 월간 리포트는 만들지 않습니다.
-
-제공 내용
-
-- 환경 유지율
-- 평균 환경 데이터
-- 자동 제어 횟수
-- 이상 환경 발생 내역
-- 개선 제안
+재배 생성 직후 버섯의 효능/재배 주의사항을 자연어로 보여줍니다. Sensor Service의
+`mushroom_reference` 텍스트 컬럼을 RAG 컨텍스트로 사용해 LLM이 자연스러운 문장으로
+재구성합니다. `mushroomType`(5종 고정) 기준으로 캐싱(`ai:mushroom:{mushroomType}:guide`,
+TTL 7일)해 반복 호출을 피합니다.
 
 ---
 
@@ -337,50 +106,27 @@ POST /ai/analysis
 
 ---
 
-## 버섯 가이드 생성
-
-POST /ai/mushroom-guide
-
----
-
-## AI 챗봇
+## 챗봇
 
 POST /ai/chat
 
----
+POST /ai/chat/telegram/webhook (내부용)
 
-## AI 챗봇 대화 이력 조회
+POST /ai/chat/discord/webhook (내부용)
 
 GET /ai/chat/history
 
 ---
 
-## 일일 피드백 조회
-
-GET /ai/feedback/daily
-
-일일 피드백 생성 자체는 사용자가 호출하는 API가 아니라 Daily Scheduler가 매일 자동으로
-수행합니다. 이 엔드포인트는 이미 생성된 피드백을 조회만 합니다.
-
----
-
-## 인사이트 조회
-
-GET /ai/insight
-
-일일 피드백/AI 리포트와 달리 스케줄러가 미리 생성해두지 않으며, 사용자가 이 API를 호출한
-시점에 Embedding Service 검색 + LLM 요약이 즉시 수행됩니다(사용자 요청 시점 처리). 배치
-임베딩 적재(Insight Batch Scheduler)는 이 조회와 별개의 흐름입니다.
-
----
-
-## AI 리포트 조회
+## 리포트/피드백/인사이트/가이드
 
 GET /ai/report
 
-리포트 생성 자체는 사용자가 호출하는 API가 아니라 Sensor Service의 Weekly Scheduler가
-전달한 데이터를 받아 AI Service가 매주 자동으로 생성합니다. 이 엔드포인트는 가장 최근 생성된
-리포트를 조회만 합니다.
+GET /ai/feedback/daily
+
+GET /ai/insight
+
+POST /ai/mushroom-guide
 
 ---
 
@@ -388,11 +134,12 @@ GET /ai/report
 
 AI Service는 하나의 PostgreSQL Database를 사용합니다.
 
-### Table
+## Table
 
-- chat_message (챗봇 대화 이력)
-- growth_record (생육 분석 결과 이력)
-- daily_feedback (일일 피드백 이력)
+- chat_log
+- growth_record
+- daily_feedback
+- insight
 
 자세한 내용은 [ai-db.md](../03_Database/ai-db.md) 참고.
 
@@ -400,27 +147,9 @@ AI Service는 하나의 PostgreSQL Database를 사용합니다.
 
 # Redis
 
-AI 응답 캐시를 저장합니다.
+- 챗봇 응답 캐시, 생육 분석 결과 캐시, 리포트 캐시, 버섯 가이드 캐시, 인사이트 캐시
 
-캐시 대상
-
-- AI 분석 결과 (`growth_record`에도 영구 저장되는 것과 별개로, 빠른 재조회용 캐시)
-- AI 리포트 (Weekly Scheduler가 push로 미리 채워둠, 사용자 요청 시 생성하지 않음)
-- AI 챗봇 응답
-- 버섯 가이드 (mushroomType 기준, cultivationId와 무관)
-- 인사이트 (`ai:{cultivationId}:insight`, 사용자 요청 시점에 채워짐 — 유일하게 push가 아닌
-  요청 시점에 생성되어 캐시되는 항목)
-
-일일 피드백은 Redis에 캐시하지 않습니다. 하루에 한 번만 생성되고 `daily_feedback`에 바로
-영구 저장되므로 별도 캐시가 필요하지 않습니다.
-
----
-
-# MinIO
-
-AI Service는 Vision 분석을 위해 사진을 조회합니다.
-
-사진을 직접 저장하지는 않으며, Cultivation Service가 저장한 이미지를 읽기 전용으로 사용합니다.
+자세한 내용은 [redis.md](../03_Database/redis.md) 참고.
 
 ---
 
@@ -428,42 +157,17 @@ AI Service는 Vision 분석을 위해 사진을 조회합니다.
 
 ## 호출하는 서비스
 
-### Embedding Service
+### Cultivation Service
 
-- AI 챗봇의 유사 재배 사례 검색 (선택적 호출)
-- 인사이트 배치 임베딩 요청 (Insight Batch Scheduler가 임계치 도달 시, 버섯 종류/환경
-  평균/생육 점수/수확량을 묶어 전달 → Embedding Service가 임베딩 후 `cultivation_insight`
-  인덱스에 저장)
-- 인사이트 유사 사례 검색 (사용자 요청 시점, 버섯 종류 + 온도 오차 범위로 검색)
-
----
+- 생육 사진 조회, 챗봇/인사이트 조회 시 버섯 종류 조회
 
 ### Sensor Service
 
-- 센서 데이터 조회 (AI 챗봇에서 참고용으로 사용)
-- 일일 피드백 생성 시 재배의 `environment_setting`(최근 변경 이력) 조회
-  (`GET /api/v1/sensors/cultivations/{cultivationId}/environment-history`, Daily Scheduler 실행 시)
-- 인사이트 배치 임베딩 적재 시 환경 평균 일괄 조회
-  (`POST /api/v1/sensors/environment-averages`, Insight Batch Scheduler 실행 시)
-- 인사이트 조회 시 현재 재배의 환경 평균 조회
-  (`GET /api/v1/sensors/cultivations/{cultivationId}/environment-average`, 사용자 요청 시점)
+- 센서 데이터 조회, 환경 변경 이력/평균 조회, 버섯 참조 데이터(RAG 컨텍스트) 조회
 
-주간 데이터는 더 이상 AI Service가 요청 시점에 조회하지 않습니다. Sensor Service의 Weekly
-Scheduler가 먼저 집계해 전달합니다(아래 "호출받는 서비스" 참고).
+### Notification Service
 
-> ℹ️ **변경 이력**: 환경 변경 이력/평균 조회는 원래 Cultivation Service를 호출했지만,
-> `environment_setting`이 Sensor Service로 이관되면서 모두 Sensor Service 호출로 바뀌었습니다.
-
----
-
-### Cultivation Service
-
-- 버섯 가이드 생성 시 `GET /api/v1/mushroom-references/{mushroomType}` 호출 (RAG 컨텍스트 조회, 캐시 미스 시에만)
-- 인사이트 배치 임베딩 적재 시 (Insight Batch Scheduler 실행 시)
-  - `GET /api/v1/harvests/unembedded-count` (미임베딩 건수 조회)
-  - `GET /api/v1/harvests/unembedded` (미임베딩 목록 조회, 임계치 도달 시에만)
-  - `PATCH /api/v1/harvests/embedded` (Embedding Service 저장 성공 후 완료 처리)
-- 인사이트 조회 시 재배의 버섯 종류 조회 (`GET /cultivations/{cultivationId}`, 사용자 요청 시점)
+- Telegram/Discord 챗봇 웹훅 수신 시 발신자 → cultivationId 조회
 
 ---
 
@@ -471,407 +175,54 @@ Scheduler가 먼저 집계해 전달합니다(아래 "호출받는 서비스" �
 
 ### Cultivation Service
 
-- 생육 사진 Vision 분석 요청 (사진 URL 포함)
+- 생육 사진 Vision 분석 요청
 
 ### Sensor Service
 
-- Weekly Scheduler가 집계한 주간 통계를 전달(push)하며, AI Service는 이를 받아 리포트를
-  생성합니다.
+- Weekly Scheduler가 집계한 주간 통계 전달(push)
 
 ### API Gateway
 
-- AI 챗봇 요청
-- 버섯 가이드 요청 (Client가 직접 호출, Cultivation Service를 거치지 않음)
-- AI 리포트 조회, 일일 피드백 조회 요청
+- 챗봇/리포트/피드백/인사이트/가이드 REST API 요청
 
 ---
 
 # Event
 
-## 발행 이벤트
+## Publish
 
-### WeeklyReportCompletedEvent
+### WeeklyReportCompletedEvent / DailyFeedbackCompletedEvent
 
-Sensor Service의 Weekly Scheduler가 집계한 데이터를 받아 AI 리포트 생성이 완료되면 발행합니다.
+Notification Service가 구독해 알림을 보냅니다.
 
-구독 서비스: Notification Service
+## Subscribe
 
----
+### HarvestCompletedEvent
 
-### DailyFeedbackCompletedEvent
-
-Daily Scheduler가 재배별 일일 피드백 생성을 완료하면 발행합니다.
-
-```json
-{
-    "cultivationId": 3,
-    "feedbackDate": "2026-08-15",
-    "hasGrowthData": true,
-    "createdAt": "2026-08-15T23:00:00"
-}
-```
-
-구독 서비스: Notification Service
-
----
-
-생육 분석(Vision), 챗봇은 사용자 요청에 대한 동기 응답으로 결과가 즉시 전달되므로 별도 이벤트를 발행하지 않습니다.
-
----
-
-# Scheduler
-
-## Daily Scheduler
-
-매일 정해진 시각(예: 23:00)에 RUNNING 상태인 재배를 순회하며 일일 피드백을 생성합니다.
-
-```
-RUNNING 상태 재배 순회
-
-↓
-
-재배별로 growth_record(최근 며칠) 조회
-
-↓
-
-Sensor Service OpenFeign 호출 (environment_setting 최근 변경 이력 조회)
-
-↓
-
-그날 growth_record 있음 → LLM으로 환경 변경과 생육 추이의 상관관계 해석
-그날 growth_record 없음 → LLM 호출 없이 고정 안내 문구 사용
-
-↓
-
-daily_feedback 저장 (PostgreSQL)
-
-↓
-
-RabbitMQ Publish (DailyFeedbackCompletedEvent)
-```
-
-AI Service가 직접 스케줄러를 갖습니다. 필요한 데이터(생육 분석 이력은 AI Service 자신,
-환경 변경 이력은 Sensor Service)를 오케스트레이션합니다.
-
-> ℹ️ **변경 이력**: 환경 변경 이력 조회 대상이 `environment_setting` 이관에 따라
-> Cultivation Service에서 Sensor Service로 바뀌었습니다.
-
----
-
-## Insight Batch Scheduler
-
-매일 00시에 실행되며, 완료된 재배 중 아직 임베딩되지 않은 건이 전체 합산 20건 이상 쌓였는지
-확인하고, 쌓였다면 그 배치를 한 번에 임베딩합니다.
-
-```
-Cultivation Service OpenFeign 호출 (GET /api/v1/harvests/unembedded-count)
-
-↓
-
-20건 미만 → 이번 실행 종료 (다음 날 다시 확인)
-
-20건 이상 ↓
-
-Cultivation Service OpenFeign 호출 (GET /api/v1/harvests/unembedded, 미임베딩 목록)
-
-↓
-
-Sensor Service OpenFeign 호출 (POST /api/v1/sensors/environment-averages, cultivationId 목록으로 환경 평균 일괄 조회)
-
-↓
-
-각 건에 대해 AI Service 자신의 growth_record에서 생육 점수 조회 후 병합
-
-↓
-
-Embedding Service OpenFeign 호출 (배치 임베딩 요청)
-
-↓
-
-성공 → Cultivation Service OpenFeign 호출 (PATCH /api/v1/harvests/embedded, 완료 처리)
-실패 → 완료 처리하지 않음 (다음 배치 때 동일 건이 다시 미임베딩 목록에 포함되어 재시도됨)
-```
-
-Daily Scheduler와 마찬가지로 AI Service가 직접 스케줄러를 소유하며, 이번에는 Cultivation
-Service/Sensor Service/Embedding Service 세 서비스를 오케스트레이션합니다. "임베딩 여부"의
-최종 소유권은 Cultivation Service(`harvest.is_embedded`)에 있고, AI Service는 워터마크를
-별도로 관리하지 않습니다.
-
-> ℹ️ **변경 이력**: 환경 평균 조회가 `GET /api/v1/harvests/unembedded` 응답에 포함되던
-> 방식에서, Sensor Service의 별도 배치 조회 API를 호출하는 방식으로 바뀌었습니다.
-> `environment_setting`이 Sensor Service로 이관되며 생긴 변화입니다.
+Cultivation Service가 수확 기록 시 발행합니다. 인사이트 사례(`insight` 행) 생성을
+트리거합니다.
 
 ---
 
 # Sequence
 
-## 버섯 가이드 생성
-
-Client (재배 생성 완료 직후)
-
-↓
-
-AI Service
-
-↓
-
-Redis 캐시 조회 (ai:mushroom:{mushroomType}:guide)
-
-↓
-
-Cache Hit → 즉시 반환
-
-↓
-
-Cache Miss → Cultivation Service OpenFeign 호출 (`GET /api/v1/mushroom-references/{mushroomType}`, RAG 컨텍스트 조회)
-
-↓
-
-LLM 호출 (원문을 참고해 효능/주의사항 생성) → Redis 캐시 저장 (TTL 7일) → 반환
-
-↓
-
-Client
-
----
-
-## AI 챗봇
-
-Client
-
-↓
-
-AI Service
-
-↓
-
-Redis 캐시 조회 (ai:{hash})
-
-↓
-
-Cache Miss → Sensor Service 조회 + Embedding Service 유사 사례 검색(선택) → LLM
-
-↓
-
-chat_message 저장 (PostgreSQL)
-
-↓
-
-Client
-
----
-
-## AI 챗봇 대화 이력 조회
-
-Client
-
-↓
-
-AI Service
-
-↓
-
-chat_message 조회 (cultivation_id, 최신순)
-
-↓
-
-Client
-
----
-
-## AI 리포트 생성
-
-Weekly Scheduler (Sensor Service)
-
-↓
-
-주간 데이터 집계 (InfluxDB)
-
-↓
-
-AI Service (OpenFeign, push)
-
-↓
-
-LLM
-
-↓
-
-Redis 저장 (report:{cultivationId}:weekly) + RabbitMQ Publish (WeeklyReportCompletedEvent)
-
-사용자는 이 흐름과 별개로 `GET /ai/report`로 이미 생성된 리포트를 언제든 조회할 수 있습니다.
-
----
-
-## AI 리포트 조회
-
-Client
-
-↓
-
-AI Service
-
-↓
-
-Redis 조회 (report:{cultivationId}:weekly)
-
-↓
-
-Client
-
----
-
-## 일일 피드백
-
-Daily Scheduler (AI Service)
-
-↓
-
-growth_record 조회 (그날 분석 결과 존재 여부 확인)
-
-↓
-
-Sensor Service OpenFeign 호출 (environment_setting 최근 변경 이력)
-
-↓
-
-그날 growth_record 있음 → LLM 호출 (환경 변경 vs 생육 추이 상관관계 해석)
-그날 growth_record 없음 → 고정 문구 사용 (LLM 미호출)
-
-↓
-
-daily_feedback 저장 (PostgreSQL)
-
-↓
-
-RabbitMQ Publish (DailyFeedbackCompletedEvent) → Notification Service
-
----
-
-## 일일 피드백 조회
-
-Client
-
-↓
-
-AI Service
-
-↓
-
-daily_feedback 조회 (cultivation_id, 최신순)
-
-↓
-
-Client
-
----
-
-## 인사이트 배치 임베딩 적재
-
-Insight Batch Scheduler (AI Service, 매일 00시)
-
-↓
-
-Cultivation Service OpenFeign 호출 (미임베딩 건수 조회)
-
-↓
-
-20건 미만 → 종료
-
-↓ 20건 이상
-
-Cultivation Service OpenFeign 호출 (미임베딩 목록 조회)
-
-↓
-
-Sensor Service OpenFeign 호출 (환경 평균 일괄 조회, POST /api/v1/sensors/environment-averages)
-
-↓
-
-growth_record 조회 (건별 생육 점수 병합)
-
-↓
-
-Embedding Service OpenFeign 호출 (배치 임베딩 요청)
-
-↓
-
-Embedding Service → Elasticsearch (cultivation_insight 인덱스 저장)
-
-↓
-
-Cultivation Service OpenFeign 호출 (PATCH /api/v1/harvests/embedded, 완료 처리)
-
-자세한 내용은 [insight.md](../04_sequence/insight.md) 참고.
-
----
-
-## 인사이트 조회
-
-Client
-
-↓
-
-AI Service
-
-↓
-
-Redis 캐시 조회 (ai:{cultivationId}:insight)
-
-↓
-
-Cache Hit → 즉시 반환
-
-↓
-
-Cache Miss → Cultivation Service OpenFeign 호출 (버섯 종류 조회) + Sensor Service OpenFeign
-호출 (현재 재배 환경 평균 조회)
-
-↓
-
-Embedding Service OpenFeign 호출 (버섯 종류 + 온도 오차 범위로 유사 사례 검색)
-
-↓
-
-매칭 사례 있음 → LLM 요약 → Redis 캐시 저장 → 반환
-매칭 사례 없음 → LLM 미호출, 고정 안내 문구 반환 (캐시하지 않음)
-
-↓
-
-Client
-
-자세한 내용은 [insight.md](../04_sequence/insight.md) 참고.
+관련 시퀀스는 [growth-analysis.md](../04_sequence/growth-analysis.md),
+[ai-chat.md](../04_sequence/ai-chat.md), [ai-report.md](../04_sequence/ai-report.md),
+[daily-feedback.md](../04_sequence/daily-feedback.md),
+[insight.md](../04_sequence/insight.md) 참고.
 
 ---
 
 # 예외 상황
 
-- Embedding 검색 실패
-- LLM 응답 실패 (버섯 가이드 생성 실패 포함)
-- 버섯 가이드 생성 시 Cultivation Service 호출 실패 (RAG 컨텍스트 조회 실패)
-- Redis Cache 조회 실패
-- chat_message 저장 실패 (PostgreSQL) — 저장에 실패해도 챗봇 응답 자체는 사용자에게 반환합니다
-- 다른 사용자의 재배에 대한 대화 이력 조회 시도
-- Sensor 데이터 부족
-- 등록된 사진 없음
-- Vision 모델 분석 실패
-- growth_record 저장 실패 (PostgreSQL) — 저장에 실패해도 생육 분석 응답 자체는 사용자에게 반환합니다
-- 일일 피드백 생성 시 Sensor Service 호출 실패 (environment_setting 이력 조회 실패)
-- daily_feedback 저장 실패 (PostgreSQL)
-- Weekly Scheduler로부터 데이터 전달 실패 (해당 주는 리포트가 갱신되지 않고 이전 리포트가 Redis에 남아있음)
-- 인사이트 배치 임베딩 적재 시 Cultivation Service 호출 실패 (미임베딩 건수/목록 조회 실패) — 이번 배치는 건너뛰고 다음 날 다시 시도
-- 인사이트 배치 임베딩 적재 시 Sensor Service 호출 실패 (환경 평균 일괄 조회 실패) — 이번 배치는 건너뛰고 다음 날 다시 시도
-- 인사이트 배치 임베딩 적재 시 Embedding Service 호출 실패 — 해당 건들은 완료 처리(is_embedded)되지 않아 다음 배치 때 재시도됨
-- 인사이트 조회 시 Cultivation Service 호출 실패 (버섯 종류 조회 실패) 또는 Sensor Service 호출 실패 (현재 재배 환경 평균 조회 실패)
-- 인사이트 조회 시 Embedding Service 호출 실패 또는 유사 사례 없음 — LLM 미호출, 고정 안내 문구 반환
-- API 호출 시간 초과
+- Vision 모델 분석 실패 / LLM 응답 실패
+- chat_log/growth_record/daily_feedback/insight 저장 실패 (저장 실패해도 사용자 응답은 반환)
+- Telegram/Discord 웹훅 수신 시 매칭되는 notification_endpoint 없음
+- 인사이트 적재 시 Sensor Service 호출 실패 (환경 평균 조회 실패 — 해당 수확의 insight
+  적재는 건너뛰며, 이벤트 유실/실패에 대비한 재처리는 추후 개발 예정)
 
 ---
 
 # 추후 개발 예정
 
-- 사용자 맞춤형 프롬프트
-- AI 응답 품질 평가
-- 모델 교체(OpenAI, Gemini 등)
-- 다국어 지원
-- AI 재배 코칭
+- 챗봇 봇 명령어로 다른 재배 지정
