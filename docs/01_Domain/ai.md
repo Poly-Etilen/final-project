@@ -32,14 +32,18 @@ AI Service는 LLM과 Vision 모델을 활용해 지능형 기능을 제공하는
 사용자가 업로드한 사진을 Vision 모델로 분석해 생육 점수/균사 성장률/갓 크기/색상/병충해/
 성장 단계/예상 수확일을 반환합니다. 분석 결과는 Redis(`ai:{cultivationId}:analysis`,
 TTL 6시간)로 빠른 재조회를 지원하는 동시에 `growth_record`에 영구 저장해 일일 피드백의
-추이 비교에 사용합니다.
+추이 비교에 사용합니다. `growth_record`는 지표들을 컬럼별로 나누지 않고
+`analysis_data`(JSONB) 하나에 담아 저장하며, 분석에 사용한 사진은 파일 정보를
+복사하지 않고 `cultivation_photo_id`(소프트 참조)만 저장합니다.
 
 ---
 
 ## AI 챗봇
 
-사용자는 자연어로 재배 관련 질문을 할 수 있습니다. 매 발화(질문/응답)는 `chat_log`에
-한 행씩 저장됩니다. 채널마다 제공하는 기능이 다릅니다.
+사용자는 자연어로 재배 관련 질문을 할 수 있습니다. 대화는 대화방
+단위(`chat_conversation`)와 발화 단위(`chat_message`) 두 테이블로 나눠 저장합니다 —
+매 발화(질문/응답)는 소속 대화방 안에서 `sequence_number`가 증가하는 `chat_message`
+행으로 한 행씩 쌓입니다. 채널마다 제공하는 기능이 다릅니다.
 
 ### 웹 챗봇 (WebSocket, `channel_type=APP`)
 
@@ -58,9 +62,9 @@ Notification Service가 보내는 알림을 수신하는 채널이면서, 동시
 같은 자연어 질문에 AI가 답변하는 채널입니다. 사용자가 봇에게 메시지를 보내면 웹훅으로
 전달됩니다. AI Service는 발신자 Chat ID로 Notification Service의 `notification_endpoint`를
 조회해 `cultivationId`를 알아냅니다(알림 채널이 재배 단위로 등록되므로). 이 경로로는 개별
-사용자를 특정할 수 없어 `user_id`는 NULL로 저장되지만, 대신 항상 특정 재배 맥락(Sensor
-데이터 조회 포함)에서 답변할 수 있습니다. 매칭되는 endpoint가 없으면 "먼저 이 채널을
-재배에 등록해주세요" 안내로 응답합니다.
+사용자를 특정할 수 없어 `chat_conversation.user_id`는 NULL로 저장되지만, 대신 항상 특정
+재배 맥락(Sensor 데이터 조회 포함)에서 답변할 수 있습니다. 매칭되는 endpoint가 없으면
+"먼저 이 채널을 재배에 등록해주세요" 안내로 응답합니다.
 
 웹 챗봇과 달리 `/` 명령어나 여러 사용자가 함께 쓰는 채팅방 기능은 제공하지 않습니다 —
 관련 설계는 아직 논의 중이며 이 문서에서는 다루지 않습니다.
@@ -69,7 +73,7 @@ Notification Service가 보내는 알림을 수신하는 채널이면서, 동시
 
 답변 생성 시 Cultivation Service에서 현재 환경/통계를 조회하고, 필요하면 같은 호출로 해당
 재배의 버섯 종류에 맞는 `mushroom_reference` 텍스트(효능/재배 가이드)를 함께 받아 LLM
-컨텍스트로 사용합니다. 버섯 종류가 5종으로 고정되어 있어 `mushroomType`으로 정확히
+컨텍스트로 사용합니다. 버섯 종류가 5종으로 고정되어 있어 `mushroomId`로 정확히
 일치하는 한 건만 조회하면 되므로, 별도의 유사도 검색 없이 직접 조회로 충분합니다.
 
 동일 질문 반복 호출을 줄이기 위해 Redis(`ai:{hash}`, TTL 24시간)에 응답을 캐싱합니다.
@@ -122,8 +126,8 @@ Daily Scheduler가 매일 재배별로 `growth_record`(생육 추이), Cultivati
 수확이 기록되면(`HarvestCompletedEvent`) 인사이트 적재와 함께, 그 재배의 상품 등급
 원점수(`productScore`, 0~100)를 계산합니다.
 
-- 생육 점수 평균: 그 재배의 모든 `growth_record.growth_score` 평균 (자체 DB 조회, 호출
-  없음)
+- 생육 점수 평균: 그 재배의 모든 `growth_record.analysis_data->>'growthScore'` 평균
+  (자체 DB 조회, 호출 없음)
 - 환경 유지 점수: 그 재배 기간 동안 측정 항목별로 추천 범위 안에 있었던 시간 비율의
   평균 — Cultivation Service에 새로 집계 조회(측정값 원본인 InfluxDB는 AI Service가
   직접 접근하지 않으므로, Cultivation Service가 항목별 비율을 미리 집계해 반환)
@@ -140,7 +144,7 @@ Daily Scheduler가 매일 재배별로 `growth_record`(생육 추이), Cultivati
 
 재배 생성 직후 버섯의 효능/재배 주의사항을 자연어로 보여줍니다. Cultivation Service의
 `mushroom_reference` 텍스트 컬럼을 RAG 컨텍스트로 사용해 LLM이 자연스러운 문장으로
-재구성합니다. `mushroomType`(5종 고정) 기준으로 캐싱(`ai:mushroom:{mushroomType}:guide`,
+재구성합니다. `mushroomId`(5종 고정) 기준으로 캐싱(`ai:mushroom:{mushroomId}:guide`,
 TTL 7일)해 반복 호출을 피합니다.
 
 ---
@@ -183,7 +187,8 @@ AI Service는 하나의 PostgreSQL Database를 사용합니다.
 
 ## Table
 
-- chat_log
+- chat_conversation
+- chat_message
 - growth_record
 - daily_feedback
 - insight
@@ -266,7 +271,8 @@ Cultivation Service가 수확 기록 시 발행합니다. 인사이트 사례(`i
 # 예외 상황
 
 - Vision 모델 분석 실패 / LLM 응답 실패
-- chat_log/growth_record/daily_feedback/insight 저장 실패 (저장 실패해도 사용자 응답은 반환)
+- chat_conversation/chat_message/growth_record/daily_feedback/insight 저장 실패
+  (저장 실패해도 사용자 응답은 반환)
 - Telegram/Discord 웹훅 수신 시 매칭되는 notification_endpoint 없음
 - 웹 챗봇 WebSocket 연결 끊김 / 재연결
 - `/` 명령어 처리 중 외부 공공데이터 API 호출 실패

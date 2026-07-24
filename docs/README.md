@@ -46,16 +46,17 @@ OpenFeign으로 확인합니다.
 ### 정규화 — 공통 도메인은 참조 테이블로
 
 온도/습도/CO₂/조도라는 같은 측정 항목 집합이 여러 테이블에서 자유 문자열로
-반복되지 않도록 `measurement_type` 참조 테이블(Cultivation DB)로 한 번만 정의하고,
-`sensor_type`/`environment_setting`/`mushroom_reference_threshold`가 이를 FK로
-참조합니다.
+반복되지 않도록 `sensor_type` 참조 테이블(Cultivation DB, 구 `measurement_type`)로
+한 번만 정의하고, `cultivation_sensor_type`/`environment_setting`/
+`mushroom_reference_threshold`가 이를 FK로 참조합니다.
 
 ### 저장소 추상화 — 사진은 object_key + storage_type
 
-생육 사진은 전체 URL을 저장하지 않고, 저장소 내 상대 경로(`object_key`)와 저장
-위치(`storage_type`: MINIO/LOCAL)만 저장합니다. 실제 접근 경로 계산은 조회 시점에
-서비스 설정 기준으로 이루어져, 저장소를 MinIO에서 로컬로(또는 그 반대로) 바꾸더라도
-기존 데이터를 다시 쓸 필요가 없습니다.
+생육 사진(Cultivation DB `cultivation_photo`)과 프로필 이미지(Auth DB
+`profile_image`, 신규)는 전체 URL을 저장하지 않고, 저장소 내 상대 경로(`object_key`)와
+저장 위치(`storage_type`: MINIO/LOCAL)만 저장합니다. 실제 접근 경로 계산은 조회
+시점에 서비스 설정 기준으로 이루어져, 저장소를 MinIO에서 로컬로(또는 그 반대로)
+바꾸더라도 기존 데이터를 다시 쓸 필요가 없습니다.
 
 ### Soft Delete
 
@@ -87,10 +88,10 @@ Service는 트랜잭션 경계가 자주 겹쳐 하나의 서비스로 통합했
 |--------|-----------|--------|----------|----------------|
 | API Gateway | 라우팅, 인증 토큰 검증 | - | - | 전체 시퀀스 최초 진입점 |
 | Auth | 인증(이메일+구글 소셜 로그인, `oauth_user`로 provider 정규화), JWT(role 클레임 포함), 이메일 인증, 휴면 계정 전환/재활성화, 회원 탈퇴(Soft Delete) | [auth.md](./01_Domain/auth.md) | [auth-db.md](./03_Database/auth-db.md) | [signup](./04_sequence/signup.md), [login](./04_sequence/login.md), [withdraw](./04_sequence/withdraw.md) |
-| Cultivation | 재배 생성/조회/이력/종료, 수확(재배당 한 번) 기록, 상품 등급 매핑, 생육 사진 업로드, 센서 장치 CRUD, 목표 환경 범위 저장/조회/평균 계산, 버섯 참조 데이터 관리, 측정값 저장(Redis/InfluxDB)·조회·통계(일일 피드백용 일간 집계 포함), 문의(Inquiry) 등록/조회/관리자 답변·처리 | [cultivation.md](./01_Domain/cultivation.md) | [cultivation-db.md](./03_Database/cultivation-db.md), [influxdb.md](./03_Database/influxdb.md), [redis.md](./03_Database/redis.md) | [create-cultivation](./04_sequence/create-cultivation.md), [harvest](./04_sequence/harvest.md), [product-grade](./04_sequence/product-grade.md), [growth-analysis](./04_sequence/growth-analysis.md), [sensor-data](./04_sequence/sensor-data.md), [environment-control](./04_sequence/environment-control.md), [sensor-error](./04_sequence/sensor-error.md), [inquiry](./04_sequence/inquiry.md) |
+| Cultivation | 재배 생성/조회/이력/종료, 생육/수확 모드 자동 전환, 재배 멤버 관리(공유), 수확(재배당 한 번) 기록, 상품 등급 매핑, 생육 사진 업로드, 센서 장치 CRUD, 목표 환경 범위 저장/조회/평균 계산, 버섯 참조 데이터 관리, 측정값 저장(Redis/InfluxDB)·조회·통계(일일 피드백용 일간 집계 포함), 문의(Inquiry) 등록/조회/관리자 답변·처리 | [cultivation.md](./01_Domain/cultivation.md) | [cultivation-db.md](./03_Database/cultivation-db.md), [influxdb.md](./03_Database/influxdb.md), [redis.md](./03_Database/redis.md) | [create-cultivation](./04_sequence/create-cultivation.md), [harvest](./04_sequence/harvest.md), [product-grade](./04_sequence/product-grade.md), [growth-analysis](./04_sequence/growth-analysis.md), [sensor-data](./04_sequence/sensor-data.md), [environment-control](./04_sequence/environment-control.md), [sensor-error](./04_sequence/sensor-error.md), [inquiry](./04_sequence/inquiry.md) |
 | AI | 생육 분석(Vision), 챗봇(웹 WebSocket 채팅방+'/' 명령어 / Telegram·Discord 자연어 응답), 일일 피드백(생육 추이 비교 + 환경 통계), 인사이트(타인의 유사 재배 사례 후보 리스트+상세 조회), 상품 등급 원점수 계산, 버섯 가이드(효능/주의사항) | [ai.md](./01_Domain/ai.md) | [ai-db.md](./03_Database/ai-db.md), Redis(캐시), Photo Storage(읽기 전용) | [growth-analysis](./04_sequence/growth-analysis.md), [harvest](./04_sequence/harvest.md), [ai-chat](./04_sequence/ai-chat.md), [daily-feedback](./04_sequence/daily-feedback.md), [insight](./04_sequence/insight.md), [product-grade](./04_sequence/product-grade.md) |
 | Rule Engine | MQTT 수신(Collector), 검증, 규칙 평가/자동 제어(중앙값 목표), 센서 오류 감지 | [rule-Engine.md](./01_Domain/rule-Engine.md) | Redis(목표 환경 범위 캐시만) | [sensor-data](./04_sequence/sensor-data.md), [environment-control](./04_sequence/environment-control.md), [sensor-error](./04_sequence/sensor-error.md) |
-| Notification | Telegram/Discord 알림 발송, 재배 단위 알림 채널 등록/조회/삭제, 발송 이력 관리 | [notification.md](./01_Domain/notification.md) | [notification-db.md](./03_Database/notification-db.md) | [environment-control](./04_sequence/environment-control.md), [harvest](./04_sequence/harvest.md), [sensor-error](./04_sequence/sensor-error.md) |
+| Notification | Telegram/Discord 알림 발송, 사용자 단위 알림 채널 등록/조회/삭제, 채널별 이벤트 구독 관리(재배 단위 대상 지정), 발송 이력 관리 | [notification.md](./01_Domain/notification.md) | [notification-db.md](./03_Database/notification-db.md) | [environment-control](./04_sequence/environment-control.md), [harvest](./04_sequence/harvest.md), [sensor-error](./04_sequence/sensor-error.md) |
 | DatasourceGenerator | 센서 데이터 시뮬레이션 및 MQTT 발행 (REST API 없음) | [datasource-generator.md](./01_Domain/datasource-generator.md) | DB 없음, 메모리 캐시(`sensor_cache`)만 사용 | [sensor-data](./04_sequence/sensor-data.md) |
 
 DB 전체 그림은 [database-overview.md](./03_Database/database-overview.md)에서 한

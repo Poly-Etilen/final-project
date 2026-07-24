@@ -61,9 +61,11 @@ Cultivation Service가 수확을 기록하면(재배당 한 번) 발행하는 �
 ## 2. growth_record 평균 조회
 
 같은 `cultivationId`의 모든 생육 분석 결과 평균을 자체 DB(AI DB)에서 계산합니다.
+`growth_score`는 `analysis_data`(JSONB) 안에 있으므로 JSONB 연산자로 꺼내 평균을
+계산합니다.
 
 ```sql
-SELECT AVG(growth_score) AS growth_score_avg
+SELECT AVG((analysis_data->>'growthScore')::int) AS growth_score_avg
 FROM growth_record
 WHERE cultivation_id = 12;
 ```

@@ -4,12 +4,18 @@
 
 Auth Database는 인증/인가와 회원 프로필 정보를 관리하는 Auth Service 소유의 PostgreSQL
 Database입니다. 이메일/비밀번호(LOCAL) 로그인과 구글 소셜 로그인(GOOGLE)을 모두 지원하며,
-회원가입·로그인·탈퇴·휴면 전환에 필요한 데이터를 `users`/`oauth_user` 두 테이블로 관리합니다.
+회원가입·로그인·탈퇴·휴면 전환에 필요한 데이터를 `users`/`oauth_user`/`profile_image`
+세 테이블로 관리합니다.
 
 인증 수단(LOCAL/GOOGLE)은 `users`에 직접 컬럼으로 두지 않고 `oauth_user` 하위 테이블로
 정규화했습니다. 한 사용자가 여러 소셜 계정을 연동하는 것을 스키마 차원에서 지원하기
 위함이며(연동 기능 자체는 추후 개발 예정), LOCAL 계정은 `users`만 있고 `oauth_user` 행이
 없는 상태로 표현합니다.
+
+프로필 이미지도 `users.profile_image_url`처럼 URL 문자열을 직접 저장하지 않고
+`profile_image` 하위 테이블로 분리해 `object_key` + `storage_type` 패턴으로
+저장합니다(신규, Cultivation DB의 `cultivation_photo`와 동일한 패턴). 자세한 내용은
+아래 `profile_image` 테이블 설명 참고.
 
 ---
 
@@ -25,15 +31,20 @@ PK  id
     status
     email_verified
     nickname         (UNIQUE)
-    profile_image_url
     created_at
     updated_at
     last_login_at
     deleted_at       (nullable)
 
-          │ 1
-          │
-          │
+          │ 1                              │ 1
+          │                                │
+          │                                ▼
+          │                          profile_image
+          │                          ──────────────────────────────────────────────
+          │                          PK  id
+          │                          FK  user_id       (UNIQUE)
+          │                              object_key
+          │                              storage_type
           ▼
 oauth_user
 ──────────────────────────────────────────────
@@ -61,7 +72,6 @@ FK  user_id
 | status | VARCHAR(20) | X | 계정 상태 (ACTIVE/DORMANT/DELETED), 기본값 ACTIVE |
 | email_verified | BOOLEAN | X | 이메일 인증 완료 여부, 기본값 FALSE |
 | nickname | VARCHAR(20) | X | 닉네임, UNIQUE |
-| profile_image_url | VARCHAR(500) | O | 프로필 이미지 URL |
 | created_at | DATETIME | X | 가입 일시 |
 | updated_at | DATETIME | O | 정보 수정 일시 |
 | last_login_at | DATETIME | O | 마지막 로그인 일시. 휴면 전환 판단 기준 |
@@ -100,6 +110,25 @@ JWT에 클레임으로 포함되어, 다른 서비스(예: Cultivation Service�
 
 ---
 
+## profile_image
+
+| 컬럼명 | 타입 | NULL | 설명 |
+|---------|------|------|------|
+| id | BIGSERIAL | X | PK |
+| user_id | BIGINT | X | FK, `users.id`, UNIQUE (사용자당 1장만 허용) |
+| object_key | VARCHAR(500) | X | 저장소 내 상대 경로 |
+| storage_type | VARCHAR(50) | X | 저장 위치 (MINIO/LOCAL) |
+
+기존 `users.profile_image_url`(URL 문자열 직접 저장) 컬럼을 제거하고 별도 테이블로
+분리했습니다. 이 프로젝트는 이미지 저장에 항상 `object_key` + `storage_type` 패턴(전체
+URL 대신 저장소 중립적 키)을 써왔고(Cultivation DB의 `cultivation_photo`와 동일 패턴),
+Auth Service도 이번에 처음으로 Photo Storage(MinIO/Local)를 사용하게 되면서 같은
+패턴으로 통일했습니다. `user_id`에 `UNIQUE` 제약을 둬 사용자당 프로필 이미지를 한 장만
+허용합니다(교체 시 기존 행을 갱신하거나 지우고 새로 저장). `users`와 같은 DB 안이므로
+실제 FK로 연결합니다.
+
+---
+
 # DDL
 
 ```sql
@@ -117,8 +146,6 @@ CREATE TABLE users (
     email_verified BOOLEAN NOT NULL DEFAULT FALSE,
 
     nickname VARCHAR(20) NOT NULL,
-
-    profile_image_url VARCHAR(500),
 
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -160,6 +187,23 @@ CREATE TABLE oauth_user (
 );
 ```
 
+```sql
+CREATE TABLE profile_image (
+    id BIGSERIAL PRIMARY KEY,
+
+    user_id BIGINT NOT NULL,
+
+    object_key VARCHAR(500) NOT NULL,
+
+    storage_type VARCHAR(50) NOT NULL,
+
+    CONSTRAINT fk_profile_image_users
+        FOREIGN KEY (user_id) REFERENCES users(id),
+
+    CONSTRAINT uk_profile_image_user UNIQUE (user_id)
+);
+```
+
 ---
 
 # Index
@@ -173,7 +217,8 @@ ON oauth_user(user_id);
 
 `email`/`nickname`은 UNIQUE 제약이 곧 인덱스 역할을 겸하므로 별도 인덱스를 추가하지
 않습니다. `provider_user_id` 단독 조회는 없고 항상 `(provider, provider_user_id)` 쌍으로
-조회하므로, UNIQUE 복합 인덱스 하나로 충분합니다.
+조회하므로, UNIQUE 복합 인덱스 하나로 충분합니다. `profile_image.user_id`도
+`UNIQUE` 제약이 인덱스 역할을 겸해 별도 인덱스를 추가하지 않습니다.
 
 ---
 
@@ -185,6 +230,10 @@ oauth_user (Auth Service)
     │ user_id (같은 DB 내 실제 FK)
     ▼
 users
+    ▲
+    │ user_id (같은 DB 내 실제 FK)
+    │
+profile_image (Auth Service)
 ```
 
 Auth Service는 다른 서비스와 데이터베이스를 공유하지 않습니다. 다른 서비스는 `userId`를
@@ -206,3 +255,8 @@ Auth Service는 다른 서비스와 데이터베이스를 공유하지 않습니
 - `role`은 USER/ADMIN 두 값만 사용하는 단순한 전역 권한이라 별도 테이블 없이 `users`에
   컬럼으로 두었습니다. 재배별 역할(소유자/참여자 구분) 같은 세분화된 권한 모델은 아직
   없습니다.
+- `profile_image`는 `user_id`에 `UNIQUE` 제약을 둬 사용자당 한 장만 허용합니다. 새
+  이미지를 업로드하면 기존 행을 교체(갱신 또는 삭제 후 재생성)하는 방식으로 처리하며,
+  이력을 남기지 않습니다(`cultivation_photo`와 달리 여러 장을 쌓아두지 않음).
+- Auth Service가 Photo Storage(MinIO/Local)를 사용하는 것은 이번이 처음입니다. 기존에는
+  Cultivation Service만 Photo Storage를 사용했습니다.

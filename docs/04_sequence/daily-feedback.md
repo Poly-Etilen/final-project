@@ -61,10 +61,18 @@ AI Service의 Daily Scheduler가 매일 정해진 시각(23:00)에 실행되어,
 ## 2. growth_record 조회
 
 재배별로 오늘 날짜에 해당하는 `growth_record`가 있는지 확인하고, 최근 며칠 치 추이도
-함께 조회합니다.
+함께 조회합니다. `growthScore`/`myceliumGrowthRate` 등 개별 지표는 `analysis_data`
+(JSONB) 안에 있으므로, LLM 입력으로 넘길 때는 JSONB 연산자로 필요한 필드만 꺼냅니다.
 
 ```sql
-SELECT * FROM growth_record
+SELECT
+    id,
+    cultivation_id,
+    analysis_data->>'growthScore' AS growth_score,
+    analysis_data->>'myceliumGrowthRate' AS mycelium_growth_rate,
+    analysis_data->>'growthStage' AS growth_stage,
+    analyzed_at
+FROM growth_record
 WHERE cultivation_id = ?
 ORDER BY analyzed_at DESC
 LIMIT 7;
@@ -80,8 +88,8 @@ AI Service → OpenFeign → Cultivation Service (`GET
 ```json
 {
     "history": [
-        { "measurementType": "TEMPERATURE", "min": 20.5, "max": 23.5, "createdAt": "2026-08-10T09:00:00" },
-        { "measurementType": "TEMPERATURE", "min": 22.5, "max": 25.5, "createdAt": "2026-08-13T14:00:00" }
+        { "sensorTypeId": 1, "sensorType": "온도", "min": 20.5, "max": 23.5, "createdAt": "2026-08-10T09:00:00" },
+        { "sensorTypeId": 1, "sensorType": "온도", "min": 22.5, "max": 25.5, "createdAt": "2026-08-13T14:00:00" }
     ]
 }
 ```
@@ -171,7 +179,9 @@ AI Service → LLM
 ## 7. 완료 이벤트 발행
 
 AI Service → RabbitMQ Publish(`DailyFeedbackCompletedEvent`) → Notification Service
-(사용자 알림)
+
+Notification Service는 `cultivationId`와 `DAILY_FEEDBACK` 구독 종류로 등록된 활성
+구독을 조회해, 구독마다 연결된 채널(Telegram/Discord)로 알림을 전송합니다.
 
 ---
 
@@ -255,3 +265,6 @@ Notification Service
 - `growth_record`는 `ai:{cultivationId}:analysis` Redis 캐시(TTL 6시간, 생육 분석
   직후 빠른 재조회용)와 역할이 다릅니다. Redis 캐시는 만료되지만 `growth_record`는
   영구 보관되어 이 시퀀스처럼 여러 날짜에 걸친 추이 비교에 사용됩니다.
+- `growth_record`의 지표 컬럼들은 `analysis_data`(JSONB) 하나로 통합되어 있어, 이
+  시퀀스에서 `growthScore`/`myceliumGrowthRate`/`growthStage` 등을 조회할 때는
+  JSONB 연산자(`analysis_data->>'필드명'`)를 사용합니다.

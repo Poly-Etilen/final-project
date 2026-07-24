@@ -66,8 +66,9 @@
 
 - API Gateway
 - Auth Service
-- Cultivation Service (재배/수확/사진, 센서 장치/목표 환경/버섯 참조 데이터 관리,
-  측정값 저장/조회, 통계·차트, 일일 피드백용 일간 통계 집계, 문의(Inquiry))
+- Cultivation Service (재배/수확/사진/상품 등급, 생육/수확 모드 자동 전환, 재배 멤버
+  관리(공유), 센서 장치/목표 환경/버섯 참조 데이터 관리, 측정값 저장/조회, 통계·차트,
+  일일 피드백용 일간 통계 집계, 문의(Inquiry))
 - AI Service
 - Rule Engine Service (MQTT 수신/Collector, 검증, 규칙 평가, 자동 제어, 센서 오류 감지)
 - Notification Service

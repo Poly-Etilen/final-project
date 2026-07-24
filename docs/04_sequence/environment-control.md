@@ -171,12 +171,18 @@ RabbitMQ Subscribe(`EnvironmentMeasuredEvent`) → Redis 저장(최신값) → I
 
 ## 9. Notification Service
 
-RabbitMQ Subscribe(`EnvironmentControlEvent`) → 등록된 채널로 알림 전송
+RabbitMQ Subscribe(`EnvironmentControlEvent`) → `cultivationId`와
+`ENVIRONMENT_CONTROL` 구독 종류로 `notification_subscription`을 조회(활성 구독만) →
+구독마다 연결된 채널(Telegram/Discord)로 알림 전송
 
 ```
 🍄 자동 제어
 습도가 목표 범위(85~95%) 아래로 떨어져 가습기를 실행했습니다.
 ```
+
+이 재배에 대해 `ENVIRONMENT_CONTROL` 구독이 없으면 이벤트 기록만 남고 발송은
+일어나지 않습니다. 자세한 구독 모델은 [notification.md](../01_Domain/notification.md)
+참고.
 
 ---
 
@@ -289,3 +295,9 @@ Rule Engine Service → Cultivation Service (Redis 캐시 미스 시에만 호�
 - 규칙 평가는 매초 원본 데이터로 수행되어 자동 제어 반응 속도에는 영향이 없지만,
   Cultivation Service의 InfluxDB 저장은 재배별 10초 간격으로 스로틀링됩니다. Redis
   "현재값"은 매초 갱신되어 대시보드 체감 실시간성은 유지됩니다.
+- `environment_setting`은 항목 구분을 `sensor_type_id`(FK, `sensor_type.id`)로
+  가지고 있으며 `threshold_unit` 컬럼은 없습니다. Cultivation Service가
+  `EnvironmentRangeUpdatedEvent`를 발행할 때, 그리고 캐시 미스로 OpenFeign fallback을
+  호출할 때 모두 `sensor_type`과 JOIN해 단위를 함께 계산해 전달합니다. Rule Engine
+  Service의 Redis 캐시(`cultivation:{cultivationId}:range`)에는 min/max 값만 있으면
+  충분해 단위 자체는 캐싱하지 않습니다.

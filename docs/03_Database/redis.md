@@ -125,8 +125,10 @@ Vision 분석은 비용이 크므로, 동일 재배의 최근 분석 결과를 �
 (`GET /cultivations/{cultivationId}/analysis`가 새로 분석하지 않고 이 캐시를 반환합니다.)
 같은 분석 결과는 이 캐시와 별개로 `growth_record` 테이블(PostgreSQL, AI DB)에도 영구
 저장됩니다. 이 캐시는 TTL이 지나면 사라지는 "빠른 재조회"용이고, `growth_record`는 만료되지
-않는 "이력 비교"용입니다(일일 피드백에 사용). (자세한 내용은
-[ai-db.md](./ai-db.md), [daily-feedback.md](../04_sequence/daily-feedback.md) 참고)
+않는 "이력 비교"용입니다(일일 피드백에 사용). 아래 Value 구조는 `growth_record.analysis_data`
+(JSONB)에 저장되는 필드 구성과 동일합니다 — 다만 `growth_record`는 여기에 더해
+`cultivation_photo_id`(사진 소프트 참조)와 `analyzed_at`을 함께 컬럼으로 갖습니다.
+(자세한 내용은 [ai-db.md](./ai-db.md), [daily-feedback.md](../04_sequence/daily-feedback.md) 참고)
 
 Key
 
@@ -165,18 +167,18 @@ TTL
 ## 버섯 가이드 Cache
 
 버섯 종류(공공데이터 기준 5가지 고정)별 효능/재배 주의사항은 항상 같은 내용이므로,
-재배(cultivationId)가 아닌 mushroomType 기준으로 캐싱해 반복 LLM 호출을 피합니다.
+재배(cultivationId)가 아닌 mushroomId 기준으로 캐싱해 반복 LLM 호출을 피합니다.
 
 Key
 
 ```
-ai:mushroom:{mushroomType}:guide
+ai:mushroom:{mushroomId}:guide
 ```
 
 Example
 
 ```
-ai:mushroom:OYSTER:guide
+ai:mushroom:3:guide
 ```
 
 Value
@@ -352,7 +354,7 @@ Redis는 항상 갱신하지만, InfluxDB는 재배별 10초 간격으로 스로
 
 - AI 챗봇 응답 (ai:{hash}, TTL 24시간)
 - AI 생육 분석 결과 (ai:{cultivationId}:analysis, TTL 6시간)
-- 버섯 가이드 (ai:mushroom:{mushroomType}:guide, TTL 7일)
+- 버섯 가이드 (ai:mushroom:{mushroomId}:guide, TTL 7일)
 - 인사이트 후보 (ai:{cultivationId}:insight:candidates, TTL 24시간, 요청 시점에 채워짐)
 
 일일 피드백(환경 통계 포함)은 Redis에 캐시하지 않습니다. 하루에 한 번만 생성되고
@@ -501,7 +503,7 @@ Cultivation Service OpenFeign 호출 (버섯 종류 + 환경 평균 + 내 cultiv
 
 ↓
 
-AI DB insight 테이블 검색 (mushroom_type 정확히 일치 + 온습도/CO2/조도 오차 범위 + 내 cultivation 제외, 최신순 SQL 필터)
+AI DB insight 테이블 검색 (mushroom_id 정확히 일치 + 온습도/CO2/조도 오차 범위 + 내 cultivation 제외, 최신순 SQL 필터)
 
 ↓
 

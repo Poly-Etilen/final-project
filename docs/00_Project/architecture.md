@@ -6,8 +6,9 @@
 
 - API Gateway
 - Auth Service (인증/회원 프로필/탈퇴)
-- Cultivation Service (재배/수확/사진/상품 등급 매핑, 센서 장치/목표 환경/버섯 참조
-  데이터 관리, 측정값 저장/조회, 통계·차트, 일일 피드백용 일간 통계 집계, 문의(Inquiry))
+- Cultivation Service (재배/수확/사진/상품 등급 매핑, 생육/수확 모드 자동 전환,
+  재배 멤버 관리(공유), 센서 장치/목표 환경/버섯 참조 데이터 관리, 측정값
+  저장/조회, 통계·차트, 일일 피드백용 일간 통계 집계, 문의(Inquiry))
 - AI Service (챗봇/생육 분석/일일 피드백/인사이트/상품 등급 원점수 계산/버섯 가이드)
 - Rule Engine Service (MQTT 수신/Collector, 검증, 규칙 평가, 자동 제어, 센서 오류 감지)
 - Notification Service
@@ -33,12 +34,16 @@ Rule Engine Service와 Cultivation Service는 기본적으로 RabbitMQ(`Environm
 
 ### PostgreSQL (서비스별 전용 DB)
 
-- Auth DB — `users`, `oauth_user`
-- Cultivation DB — `cultivation`, `harvest`, `photo`, `measurement_type`, `sensor`,
-  `sensor_type`, `environment_setting`, `mushroom_reference`,
-  `mushroom_reference_threshold`, `inquiry`
-- Notification DB — `notification_event`, `notification_delivery`, `notification_endpoint`
-- AI DB — `chat_log`, `growth_record`, `daily_feedback`, `insight`
+- Auth DB — `users`, `oauth_user`, `profile_image`
+- Cultivation DB — `cultivation`, `cultivation_member`, `harvest`, `cultivation_photo`,
+  `sensor_type`, `cultivation_sensor`, `cultivation_sensor_type`, `environment_setting`,
+  `mushroom_reference`, `mushroom_reference_threshold`, `inquiry_category`, `inquiry`,
+  `inquiry_answer`
+- Notification DB — `channel_type`, `subscription_target_type`, `notification_event_type`,
+  `notification_subscription_type`, `subscription_channel`, `notification_template`,
+  `notification_endpoint`, `notification_subscription`, `notification`,
+  `notification_delivery` (재배 단위 채널 공유 → 사용자 단위 구독 모델로 재설계)
+- AI DB — `chat_conversation`, `chat_message`, `growth_record`, `daily_feedback`, `insight`
 
 같은 DB 안의 관계는 실제 FK로 강제하고, 서비스 경계를 넘는 참조(`cultivation_id`
 등)는 DB 레벨 FK 없이 순수 값으로만 둡니다.
@@ -62,11 +67,14 @@ Rule Engine Service와 Cultivation Service는 기본적으로 RabbitMQ(`Environm
 
 ### Photo Storage (MinIO / Local)
 
-사용자가 업로드한 생육 사진 저장. `photo`/`growth_record`는 전체 URL이 아닌
-`object_key`(저장소 내 상대 경로) + `storage_type`(MINIO/LOCAL)만 저장해, 저장소를
-바꾸더라도 기존 데이터를 다시 쓸 필요가 없습니다.
+사용자가 업로드한 생육 사진과 프로필 이미지 저장. `cultivation_photo`(Cultivation DB)/
+`profile_image`(Auth DB)는 전체 URL이 아닌 `object_key`(저장소 내 상대 경로) +
+`storage_type`(MINIO/LOCAL)만 저장해, 저장소를 바꾸더라도 기존 데이터를 다시 쓸
+필요가 없습니다. AI DB의 `growth_record`는 사진 메타데이터를 스냅샷으로 복사하지
+않고 `cultivation_photo_id`로 소프트 참조만 합니다.
 
-- Cultivation Service가 업로드
+- Cultivation Service가 생육 사진을 업로드
+- Auth Service가 프로필 이미지를 업로드
 - AI Service가 Vision 분석을 위해 읽기 전용으로 조회
 
 ---
@@ -105,14 +113,14 @@ mushroom_reference 조회 (같은 DB, 내부 조회)
 ```
 Spring AI
 ↓
-Cultivation Service에서 mushroom_reference 직접 조회 (mushroomType 정확히 일치, RAG 컨텍스트)
+Cultivation Service에서 mushroom_reference 직접 조회 (mushroomId 정확히 일치, RAG 컨텍스트)
 ↓
 LLM
 ↓
 챗봇 답변 / 버섯 가이드
 ```
 
-버섯 종류가 5종 고정이라 재배의 `mushroomType` 하나에 대응하는 참조 텍스트를 그대로
+버섯 종류가 5종 고정이라 재배의 `mushroomId` 하나에 대응하는 참조 텍스트를 그대로
 조회해 LLM 컨텍스트로 사용하며, 별도의 벡터 검색은 필요하지 않습니다. 챗봇은 웹(APP,
 WebSocket 채팅방 + `/` 명령어)과 Telegram/Discord(알림 수신 + 자연어 질의응답) 두
 채널로 나뉩니다.
@@ -162,7 +170,7 @@ AI Service가 구독 → 환경 평균/생육 점수/한 줄 요약 조합 → i
 
 '/인사이트' 명령어 (조회, 적재와 별개)
 ↓
-insight 테이블 SQL 검색 (mushroom_type 정확히 일치 + 온습도/CO2/조도 오차 범위 +
+insight 테이블 SQL 검색 (mushroom_id 정확히 일치 + 온습도/CO2/조도 오차 범위 +
 내 재배 제외, 최신순 최대 5개) → 후보 리스트 반환 (LLM 미호출)
 ↓
 후보 선택 시 → daily_feedback 날짜별 조회 (수확일은 insight 저장 시 만든 요약으로 대체)

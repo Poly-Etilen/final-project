@@ -80,7 +80,7 @@ POST /api/v1/cultivations/{cultivationId}/photos
 ```
 
 Cultivation Service는 사진을 Photo Storage(`storage_type`에 따라 MinIO 또는 로컬)에
-저장하고 `photo` 행(`object_key`, `storage_type`)을 남깁니다.
+저장하고 `cultivation_photo` 행(`object_key`, `storage_type`)을 남깁니다.
 
 ---
 
@@ -119,8 +119,11 @@ AI Service의 Vision 모델이 사진을 분석합니다.
 ## 4. 생육 점수 계산 및 저장
 
 AI Service가 4가지 지표를 종합해 `growthScore`를 계산하고, 성장 단계와 예상 수확일을
-함께 산출해 `growth_record`(AI DB)에 영구 저장합니다. 동시에 Redis
-(`ai:{cultivationId}:analysis`, TTL 6시간)에도 캐싱합니다.
+함께 산출해 `growth_record`(AI DB)에 영구 저장합니다. 지표들은 `analysis_data`(JSONB)
+하나에 담기고, 사진은 스냅샷 복사 없이 `cultivation_photo_id`(소프트 참조)만
+저장됩니다. 동시에 Redis(`ai:{cultivationId}:analysis`, TTL 6시간)에도 캐싱합니다.
+성장 단계가 `수확적기`이면 Cultivation Service가 `cultivation.mode`를 자동으로
+`HARVEST`로 전환합니다 — 자세한 내용은 [growth-analysis.md](./growth-analysis.md) 참고.
 
 ```json
 {
@@ -191,7 +194,8 @@ Notification Service 외에 AI Service도 이 이벤트를 구독합니다 — �
 
 ## 10. Notification Service
 
-RabbitMQ Subscribe → 등록된 채널로 알림 전송
+RabbitMQ Subscribe → `cultivationId`와 `HARVEST_COMPLETED` 구독 종류로 등록된 활성
+구독을 조회 → 구독마다 연결된 채널(Telegram/Discord)로 알림 전송
 
 ```
 🍄 수확 기록 완료
@@ -230,6 +234,9 @@ Cultivation Service → RabbitMQ Publish → `CultivationFinishedEvent`
 
 ## 5. Notification Service
 
+RabbitMQ Subscribe → `cultivationId`와 `CULTIVATION_FINISHED` 구독 종류로 등록된
+활성 구독을 조회 → 구독마다 연결된 채널(Telegram/Discord)로 알림 전송
+
 ```
 🍄 재배 종료
 느타리 1호기 재배가 종료되었습니다. 수확량: 1.8kg
@@ -244,7 +251,7 @@ Cultivation Service → RabbitMQ Publish → `CultivationFinishedEvent`
 ```
 cultivation (Cultivation DB)
 harvest (Cultivation DB)
-photo (Cultivation DB)
+cultivation_photo (Cultivation DB)
 growth_record (AI DB)
 ```
 

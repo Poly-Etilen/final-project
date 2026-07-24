@@ -241,8 +241,13 @@ Rule Engine Service(검증)와 Cultivation Service(저장)는 RabbitMQ로만 연
   분석 품질에 문제가 없습니다.
 - 자동 제어 반응 속도는 Rule Engine Service가 원본(매초) 데이터를 그대로 평가하므로
   저장 스로틀링과 무관하게 유지됩니다.
-- Dashboard는 현재 상태와 이력을 각각 다른 저장소에서 조회하며, 조회 창구는 Sensor
-  Service입니다.
+- Dashboard는 현재 상태와 이력을 각각 다른 저장소에서 조회하며, 조회 창구는
+  Cultivation Service입니다.
 - AI 분석은 Redis가 아닌 InfluxDB 데이터를 기반으로 수행합니다.
 - Rule Engine Service(검증·규칙평가)와 Cultivation Service(저장·조회)는 서로 다른 서비스이며
   RabbitMQ로만 연결됩니다.
+- 이 문서에서 다루는 Redis/InfluxDB 저장은 측정값 자체이며, 목표 환경 범위
+  (`environment_setting`)와는 별개입니다. `environment_setting`은 항목을
+  `sensor_type_id`로 구분하고 `threshold_unit` 컬럼이 없어, 단위가 필요한 조회에서는
+  `sensor_type`과 JOIN해야 합니다 — 자세한 내용은
+  [environment-control.md](./environment-control.md) 참고.

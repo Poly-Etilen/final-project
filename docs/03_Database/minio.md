@@ -30,8 +30,10 @@ path/endpoint)에 있으며, 저장소를 MinIO ↔ 로컬로 바꾸더라도 �
 | MINIO | 기본 저장소. 객체 저장소(S3 호환)에 파일을 저장 |
 | LOCAL | 로컬 파일시스템에 파일을 저장 (소규모 배포/개발 환경 등에서 선택 가능) |
 
-`photo`/`growth_record` 테이블의 `storage_type` 컬럼으로 사진마다 저장 위치를 구분합니다.
-같은 시스템 안에서도 사진마다 다른 저장소를 쓸 수 있습니다(예: 마이그레이션 과도기).
+`cultivation_photo`/`profile_image` 테이블의 `storage_type` 컬럼으로 사진마다 저장
+위치를 구분합니다. 같은 시스템 안에서도 사진마다 다른 저장소를 쓸 수 있습니다(예:
+마이그레이션 과도기). AI DB의 `growth_record`는 더 이상 `storage_type`을 직접 갖지
+않고, `cultivation_photo_id`로 `cultivation_photo`를 소프트 참조합니다.
 
 ---
 
@@ -65,7 +67,7 @@ mushroom-photos
 # 메타데이터
 
 실제 이미지 파일은 저장소(MinIO 또는 로컬)에 저장하고, 아래 메타데이터는 Cultivation DB의
-`photo` 테이블에서 관리합니다.
+`cultivation_photo` 테이블에서 관리합니다.
 
 | Field | 설명 |
 |--------|------|
@@ -98,7 +100,7 @@ object_key 발급
 
 ↓
 
-PostgreSQL에 photo 메타데이터 저장 (object_key, storage_type)
+PostgreSQL에 cultivation_photo 메타데이터 저장 (object_key, storage_type)
 
 ↓
 

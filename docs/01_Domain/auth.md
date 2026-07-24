@@ -16,6 +16,7 @@ Cultivation Service의 문의 답변/재배 삭제)을 인가할 때 사용합�
 - 이메일/비밀번호 로그인, 구글 소셜 로그인
 - JWT(Access/Refresh Token) 발급 및 검증 (role 클레임 포함)
 - 회원 프로필 조회/수정
+- 프로필 이미지 업로드/삭제 (신규)
 - 회원 탈퇴 (Soft Delete)
 - 휴면 계정 전환 및 재활성화
 
@@ -70,6 +71,21 @@ Token도 즉시 삭제해, 탈퇴 응답 시점부터 재로그인이 불가능�
 
 ---
 
+## 프로필 이미지 업로드/삭제 (신규)
+
+사용자가 프로필 이미지를 업로드하면 Photo Storage(MinIO 또는 Local)에 저장하고
+`profile_image` 행(`object_key`, `storage_type`)을 남깁니다. Auth Service가 Photo
+Storage를 사용하는 것은 이번이 처음입니다 — 기존에는 Cultivation Service만 생육
+사진(`cultivation_photo`)을 위해 사용했습니다. 저장 패턴은 동일하게 전체 URL이 아닌
+`object_key` + `storage_type`만 저장하며, 실제 접근 경로는 조회 시점에 계산합니다.
+
+`profile_image.user_id`는 `UNIQUE` 제약으로 사용자당 한 장만 허용합니다. 이미
+이미지가 있는 상태에서 다시 업로드하면 기존 행을 교체합니다(이력을 남기지 않음).
+삭제 API를 호출하면 Photo Storage의 실제 파일과 `profile_image` 행을 함께 제거합니다.
+기존 `users.profile_image_url`(URL 문자열 직접 저장) 컬럼은 제거되었습니다.
+
+---
+
 # API
 
 ## 회원가입
@@ -120,6 +136,14 @@ GET /users/me
 
 ---
 
+## 프로필 이미지 (신규)
+
+POST /users/me/profile-image
+
+DELETE /users/me/profile-image
+
+---
+
 ## 회원 탈퇴
 
 DELETE /users/me
@@ -134,6 +158,7 @@ Auth Service는 하나의 PostgreSQL Database를 사용합니다.
 
 - users (email/nickname UNIQUE, role USER/ADMIN, status ACTIVE/DORMANT/DELETED, deleted_at)
 - oauth_user (provider 정규화, UNIQUE(provider, provider_user_id))
+- profile_image (object_key + storage_type, UNIQUE(user_id), 신규)
 
 자세한 내용은 [auth-db.md](../03_Database/auth-db.md) 참고.
 
@@ -153,6 +178,13 @@ Auth Service는 하나의 PostgreSQL Database를 사용합니다.
 ### 구글 공개키 엔드포인트 (외부)
 
 구글 ID Token 서명/만료 검증 (내부 서비스 간 OpenFeign 호출 아님)
+
+### Photo Storage (신규)
+
+프로필 이미지 업로드/삭제 시 MinIO 또는 Local 저장소에 파일을 저장/삭제합니다. 별도
+서비스 호출이 아니라 Cultivation Service와 동일한 방식으로 Auth Service가 직접 저장소
+클라이언트를 사용합니다. Auth Service가 Photo Storage를 사용하는 것은 이번이
+처음입니다.
 
 ---
 
@@ -191,6 +223,8 @@ Auth Service는 하나의 PostgreSQL Database를 사용합니다.
 - 이미 탈퇴한 사용자(`status = 'DELETED'`)의 로그인 시도
 - 휴면 계정 전환 및 재인증번호 불일치/만료
 - Refresh Token 만료/불일치
+- 프로필 이미지 저장소 업로드/삭제 실패
+- 지원하지 않는 이미지 파일 형식
 
 ---
 

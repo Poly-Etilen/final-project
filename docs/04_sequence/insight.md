@@ -57,7 +57,7 @@ Cultivation Service OpenFeign 호출
   GET /../environment-average (환경 평균 조회)
   GET /cultivations/mine (내가 속한 cultivation_id 목록 조회, 제외용)
 ↓
-insight 테이블 SQL 검색 (AI DB, mushroomType 정확히 일치 + 온습도/CO2/조도 4개 모두
+insight 테이블 SQL 검색 (AI DB, mushroomId 정확히 일치 + 온습도/CO2/조도 4개 모두
 오차 범위 + 내 cultivation_id 제외, 최신순 LIMIT 5)
 ├── 매칭 사례 있음 → Redis 캐시 저장 (TTL 24시간) → 후보 리스트 반환
 └── 매칭 사례 없음 → 고정 안내 문구 반환 (캐시하지 않음)
@@ -125,10 +125,12 @@ GET /api/v1/cultivations/12/environment-average
 ## 3. growth_record 조회
 
 같은 `cultivationId`에 대해 AI Service 자체 DB의 `growth_record`에서 마지막(가장
-최근) 생육 분석 결과의 `growthScore`를 조회합니다.
+최근) 생육 분석 결과의 `growthScore`를 조회합니다. `growth_score`는 `analysis_data`
+(JSONB) 안에 있으므로 JSONB 연산자로 꺼냅니다.
 
 ```sql
-SELECT growth_score FROM growth_record
+SELECT (analysis_data->>'growthScore')::int AS growth_score
+FROM growth_record
 WHERE cultivation_id = ?
 ORDER BY analyzed_at DESC
 LIMIT 1;
@@ -143,17 +145,19 @@ LIMIT 1;
 
 ```sql
 INSERT INTO insight
-    (harvest_id, cultivation_id, mushroom_type,
+    (cultivation_id, mushroom_id,
      avg_temperature, avg_humidity, avg_co2, avg_light,
-     growth_score, harvest_weight, summary)
+     growth_score, harvest_weight_grams, summary)
 VALUES
-    (41, 12, 'OYSTER', 21.8, 89.2, 780.5, 360.0, 88, 3200,
+    (12, 3, 21.8, 89.2, 780.5, 360.0, 88, 3200,
      '느타리버섯, 평균 온도 21.8℃·습도 89% 환경에서 생육 점수 88점으로 3.2kg 수확');
 ```
 
 `summary`(자연어 요약)는 이 단계에서 AI Service가 미리 만들어 함께 저장해 둡니다 —
-조회 시점에 LLM 컨텍스트로 재사용합니다. `harvest_id`는 UNIQUE 제약으로 같은 이벤트가
-중복 전달되어도 중복 적재되지 않도록 막습니다.
+조회 시점에 LLM 컨텍스트로 재사용합니다. 이벤트 payload의 `harvestId`는 저장 컬럼으로
+쓰지 않고, `cultivation_id`를 UNIQUE 제약의 키로 사용해 같은 이벤트가 중복 전달되어도
+중복 적재되지 않도록 막습니다(`harvest`가 `cultivation`과 1:1이라 `cultivation_id`
+기준 중복 방지가 기존 `harvest_id` 기준과 기능적으로 동일합니다).
 
 ---
 
@@ -176,10 +180,10 @@ GET /api/v1/cultivations/27/environment-average
 GET /api/v1/cultivations/mine
 ```
 
-`mine` 엔드포인트는 재배 멤버 기능과 함께 추가될 내부 API로, 요청자가 OWNER/MEMBER로
-속한 모든 `cultivation_id`를 반환합니다 — 인사이트 후보에서 본인이 관리하는 재배를
-제외하는 데 사용합니다. 수확 목록 조회와 달리, 재배가 아직 `RUNNING` 상태여도(harvest가
-없어도) 지금까지의 평균으로 조회할 수 있습니다.
+`mine` 엔드포인트는 재배 멤버 기능(`cultivation_member`)을 사용하는 내부 API로,
+요청자가 OWNER/MEMBER로 속한 모든 `cultivation_id`를 반환합니다 — 인사이트 후보에서
+본인이 속한 재배를 제외하는 데 사용합니다. 수확 목록 조회와 달리, 재배가 아직
+`RUNNING` 상태여도(harvest가 없어도) 지금까지의 평균으로 조회할 수 있습니다.
 
 ---
 
@@ -187,7 +191,7 @@ GET /api/v1/cultivations/mine
 
 ```sql
 SELECT * FROM insight
-WHERE mushroom_type = 'OYSTER'
+WHERE mushroom_id = 3
   AND avg_temperature BETWEEN 20.6 AND 23.6
   AND avg_humidity BETWEEN 84.2 AND 94.2
   AND avg_co2 BETWEEN 730 AND 830
@@ -197,7 +201,7 @@ ORDER BY created_at DESC
 LIMIT 5;
 ```
 
-`mushroom_type`(정확히 일치) + 온습도/CO2/조도 4개 항목(오차 범위) 조건이며, 코사인
+`mushroom_id`(정확히 일치) + 온습도/CO2/조도 4개 항목(오차 범위) 조건이며, 코사인
 유사도 기반 Vector Search가 아니라 인덱스(`idx_insight_mushroom_temp`)로 1차 필터링한
 뒤 나머지 3개 항목은 추가 조건으로 거릅니다. 사례 수가 많지 않을 것으로 예상되어
 별도 복합 인덱스는 두지 않습니다. 정렬 기준은 유사도가 아니라 `created_at`
@@ -213,8 +217,8 @@ LLM을 호출하지 않고 검색된 후보 리스트를 그대로 반환합니�
 ```json
 {
     "candidates": [
-        { "insightId": 41, "mushroomType": "OYSTER", "growthScore": 88, "harvestWeight": 3200, "createdAt": "2026-08-10T09:00:00" },
-        { "insightId": 39, "mushroomType": "OYSTER", "growthScore": 82, "harvestWeight": 2900, "createdAt": "2026-08-05T09:00:00" }
+        { "insightId": 41, "mushroomId": 3, "growthScore": 88, "harvestWeight": 3200, "createdAt": "2026-08-10T09:00:00" },
+        { "insightId": 39, "mushroomId": 3, "growthScore": 82, "harvestWeight": 2900, "createdAt": "2026-08-05T09:00:00" }
     ]
 }
 ```
@@ -275,7 +279,7 @@ ORDER BY feedback_date ASC;
 ## PostgreSQL
 
 ```
-cultivation.mushroom_type (Cultivation DB, 조회 전용)
+cultivation.mushroom_id (Cultivation DB, 조회 전용)
 environment_setting (Cultivation DB, 조회 전용) — 환경 평균 계산의 원본
 growth_record (AI DB, 조회 전용) — 생육 점수 조회용
 insight (AI DB, 쓰기 + 조회) — 인사이트 사례
@@ -343,7 +347,7 @@ AI Service → Subscribe: HarvestCompletedEvent (Cultivation Service 발행)
   뿐이며, 조회 과정에서 추가로 LLM을 호출하지 않습니다.
 - 매칭 사례가 없는 후보 리스트 응답은 캐시하지 않습니다 — 다음 요청 시점에는 새로운
   수확이 기록되어 매칭될 수 있기 때문입니다.
-- 후보 검색 조건은 정확한 값 매칭(`mushroom_type`)과 4개 범위 비교(온습도/CO2/조도)로,
+- 후보 검색 조건은 정확한 값 매칭(`mushroom_id`)과 4개 범위 비교(온습도/CO2/조도)로,
   별도의 벡터 검색 없이 인덱스가 걸린 SQL 조회로 충분합니다. 온도 외 3개 항목은
   전용 인덱스 없이 추가 조건으로 거르며, 사례 수가 늘어나 성능이 문제가 되면 복합
   인덱스 추가를 검토합니다.

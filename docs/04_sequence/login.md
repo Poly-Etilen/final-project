@@ -154,12 +154,12 @@ Auth Service
 ↓
 구글 공개키로 ID Token 서명/만료 검증
 ↓
-이메일/이름/프로필 이미지 + providerUserId 추출
+이메일/이름/프로필 이미지 URL + providerUserId 추출
 ↓
 oauth_user에서 (provider='GOOGLE', providerUserId) 조회
 ├── 존재함 → 연동된 user_id로 다음 단계
 └── 존재하지 않음 → users 자동 생성 + oauth_user 연동 행 생성
-      (password=NULL, email_verified=true, nickname/profile_image_url은 구글 프로필 기본값)
+      (password=NULL, email_verified=true, nickname은 구글 프로필 기본값)
 ↓
 JWT 생성 (Access Token + Refresh Token)
 ↓
@@ -171,6 +171,12 @@ Client
 이메일/비밀번호 검증(BCrypt) 단계가 없다는 점을 제외하면 JWT 생성/Refresh Token 저장/
 응답 형식은 LOCAL 로그인과 동일합니다. 최초 로그인 시 자동 회원가입까지 한 번에
 처리되므로 별도의 "구글 회원가입" API는 없습니다.
+
+구글이 제공하는 프로필 이미지는 URL(예: `https://lh3.googleusercontent.com/...`)
+형태입니다. `profile_image`는 우리 Photo Storage의 `object_key` + `storage_type`
+패턴으로만 저장하므로, 이 URL을 그대로 `profile_image`에 자동 저장하지 않습니다.
+최초 가입 시 프로필 이미지는 비어 있는 상태로 시작하며, 사용자가 원하면
+`POST /users/me/profile-image`로 직접 업로드할 수 있습니다.
 
 ---
 

@@ -5,8 +5,9 @@
 센서가 정상적으로 데이터를 전송하지 않거나 비정상적인 값을 전송할 경우 이를 감지해
 사용자에게 알리는 과정입니다.
 
-Rule Engine Service가 수신 주기와 데이터 유효성을 검사하며, 이상이 감지되면 Sensor
-Service의 센서 상태를 갱신하고 Notification Service를 통해 알립니다.
+Rule Engine Service가 수신 주기와 데이터 유효성을 검사하며, 이상이 감지되면
+Cultivation Service의 `cultivation_sensor` 상태를 갱신하고 Notification Service를
+통해 알립니다.
 
 ---
 
@@ -28,7 +29,7 @@ Rule Engine Service
 RabbitMQ
 ↓
 SensorErrorEvent 발행
-├── Cultivation Service → sensor.status 갱신
+├── Cultivation Service → cultivation_sensor.status 갱신
 └── Notification Service
 ↓
 Telegram / Discord
@@ -93,7 +94,7 @@ Rule Engine Service가 센서 상태를 `OFFLINE` 또는 `ERROR`로 결정합니
 
 ## 6. Cultivation Service 처리
 
-RabbitMQ Subscribe → `sensor` 테이블의 `status` 컬럼을 갱신합니다.
+RabbitMQ Subscribe → `cultivation_sensor` 테이블의 `status` 컬럼을 갱신합니다.
 
 ```
 ONLINE → OFFLINE
@@ -103,7 +104,8 @@ ONLINE → OFFLINE
 
 ## 7. Notification Service 처리
 
-동일 이벤트를 구독해 등록된 채널로 알림을 전송합니다.
+동일 이벤트를 구독해 `cultivationId`와 `SENSOR_ERROR` 구독 종류로 등록된 활성 구독을
+조회하고, 구독마다 연결된 채널(Telegram/Discord)로 알림을 전송합니다.
 
 ```
 🍄 센서 오류
@@ -117,7 +119,7 @@ ONLINE → OFFLINE
 ## PostgreSQL
 
 ```
-sensor (Cultivation DB)
+cultivation_sensor (Cultivation DB)
 ```
 
 ---
@@ -170,7 +172,7 @@ Notification Service
 
 - Rule Engine Service는 센서별 마지막 수신 시각을 메모리 또는 캐시에서 관리합니다.
 - 수신 주기 기준(60초)은 센서 타입에 따라 다르게 설정할 수 있습니다.
-- 센서 오류 상태는 Cultivation DB의 `sensor.status`에서만 관리하며 InfluxDB에는 기록하지
+- 센서 오류 상태는 Cultivation DB의 `cultivation_sensor.status`에서만 관리하며 InfluxDB에는 기록하지
   않습니다. DatasourceGenerator는 이 상태를 알 필요가 없으며 `sensor_cache`에도 상태
   컬럼을 두지 않습니다.
 - 센서가 다시 정상 데이터를 전송하면 상태를 `ONLINE`으로 복구합니다
