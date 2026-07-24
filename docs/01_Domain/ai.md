@@ -21,6 +21,7 @@ AI Service는 LLM과 Vision 모델을 활용해 지능형 기능을 제공하는
 - 일일 피드백 생성 (생육 추이 비교 + 환경 통계, Daily Scheduler)
 - 인사이트 사례 적재(수확 완료 시점) 및 조회
 - 버섯 가이드(효능/주의사항) 생성
+- 상품 등급 원점수 계산(수확 완료 시점) 및 Cultivation Service 전달
 
 ---
 
@@ -116,6 +117,25 @@ Daily Scheduler가 매일 재배별로 `growth_record`(생육 추이), Cultivati
 
 ---
 
+## 상품 등급
+
+수확이 기록되면(`HarvestCompletedEvent`) 인사이트 적재와 함께, 그 재배의 상품 등급
+원점수(`productScore`, 0~100)를 계산합니다.
+
+- 생육 점수 평균: 그 재배의 모든 `growth_record.growth_score` 평균 (자체 DB 조회, 호출
+  없음)
+- 환경 유지 점수: 그 재배 기간 동안 측정 항목별로 추천 범위 안에 있었던 시간 비율의
+  평균 — Cultivation Service에 새로 집계 조회(측정값 원본인 InfluxDB는 AI Service가
+  직접 접근하지 않으므로, Cultivation Service가 항목별 비율을 미리 집계해 반환)
+
+두 값을 합산해 만든 원점수 하나만 Cultivation Service에 전달합니다(둘을 따로 넘기지
+않음). 등급(TOP/HIGH/MID/LOW) 매핑은 Cultivation Service가 자신의 `harvest` 테이블에
+저장하면서 수행합니다 — AI Service는 등급 구간을 알 필요가 없습니다.
+
+자세한 흐름은 [product-grade.md](../04_sequence/product-grade.md) 참고.
+
+---
+
 ## 버섯 가이드
 
 재배 생성 직후 버섯의 효능/재배 주의사항을 자연어로 보여줍니다. Cultivation Service의
@@ -191,7 +211,8 @@ AI Service는 하나의 PostgreSQL Database를 사용합니다.
 
 - 생육 사진 조회, 챗봇/인사이트 조회 시 버섯 종류 조회, 센서 데이터 조회, 환경 변경
   이력/평균/일간 통계 조회, 버섯 참조 데이터(RAG 컨텍스트) 조회, 인사이트 후보 조회 시
-  내가 속한 cultivation_id 목록 조회(제외용)
+  내가 속한 cultivation_id 목록 조회(제외용), 환경 준수율 집계 조회(상품 등급용), 상품
+  등급 원점수 전달
 
 ### Notification Service
 
@@ -227,8 +248,8 @@ Notification Service가 구독해 알림을 보냅니다.
 
 ### HarvestCompletedEvent
 
-Cultivation Service가 수확 기록 시 발행합니다. 인사이트 사례(`insight` 행) 생성을
-트리거합니다.
+Cultivation Service가 수확 기록 시 발행합니다. 인사이트 사례(`insight` 행) 생성과
+상품 등급 원점수 계산을 함께 트리거합니다.
 
 ---
 
@@ -237,7 +258,8 @@ Cultivation Service가 수확 기록 시 발행합니다. 인사이트 사례(`i
 관련 시퀀스는 [growth-analysis.md](../04_sequence/growth-analysis.md),
 [ai-chat.md](../04_sequence/ai-chat.md),
 [daily-feedback.md](../04_sequence/daily-feedback.md),
-[insight.md](../04_sequence/insight.md) 참고.
+[insight.md](../04_sequence/insight.md),
+[product-grade.md](../04_sequence/product-grade.md) 참고.
 
 ---
 
@@ -250,6 +272,9 @@ Cultivation Service가 수확 기록 시 발행합니다. 인사이트 사례(`i
 - `/` 명령어 처리 중 외부 공공데이터 API 호출 실패
 - 인사이트 적재 시 Cultivation Service 호출 실패 (환경 평균 조회 실패 — 해당 수확의 insight
   적재는 건너뛰며, 이벤트 유실/실패에 대비한 재처리는 추후 개발 예정)
+- 상품 등급 계산 시 Cultivation Service의 환경 준수율 집계 조회 실패, 또는 계산한
+  원점수 전달 실패 (인사이트 적재와는 독립적으로 처리 — 한쪽이 실패해도 다른 쪽은
+  계속 진행하며, 실패 시 `harvest.product_score`/`product_grade`는 NULL로 남음)
 
 ---
 

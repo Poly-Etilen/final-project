@@ -4,7 +4,7 @@
 
 Cultivation Database는 사용자의 버섯 재배 자체와 그 재배에 필요한 센서/환경 데이터를
 함께 관리하는 Cultivation Service 소유의 PostgreSQL Database입니다(구 Sensor
-Service 통합). 재배 생성/진행/종료, 수확(flush) 기록, 생육 사진 메타데이터, 센서
+Service 통합). 재배 생성/진행/종료, 수확 기록, 생육 사진 메타데이터, 센서
 장치, 목표 환경(위험 한계값) 이력, 공공데이터 기반 버섯 참조 데이터, 문의(Inquiry)를
 모두 이 DB에서 관리합니다.
 
@@ -40,12 +40,12 @@ harvest              photo          sensor      environment_setting
 ──────────────       ──────────     ──────────  ──────────────────
 PK  id                PK  id         PK  id       PK  id
 FK  cultivation_id    FK  cultivation_id  FK  cultivation_id  FK  cultivation_id
-    flush_no              object_key      device_eui (UNIQUE) FK  measurement_type_code
+(UNIQUE)                  object_key      device_eui (UNIQUE) FK  measurement_type_code
     harvest_weight        storage_type    location            threshold_min
     memo                  uploaded_at     location_detail     threshold_max
     harvested_at          created_at      device_model        threshold_unit
-                                          status              created_at
-    UNIQUE(cultivation_id, flush_no)      is_deleted          updated_at
+    product_score                        status              created_at
+    product_grade                        is_deleted          updated_at
                                           created_at
                                               │ 1
                                               │
@@ -144,13 +144,30 @@ PK  id
 | 컬럼명 | 타입 | NULL | 설명 |
 |---------|------|------|------|
 | id | BIGSERIAL | X | PK |
-| cultivation_id | BIGINT | X | FK, `cultivation.id` |
-| flush_no | SMALLINT | X | 이 재배의 몇 번째 수확인지 (서버 자동 채번) |
+| cultivation_id | BIGINT | X | FK, `cultivation.id`, UNIQUE |
 | harvest_weight | NUMERIC(6,1) | O | 수확량(g) |
 | memo | TEXT | O | 수확 메모 |
 | harvested_at | DATETIME | X | 수확 일시 |
+| product_score | NUMERIC(5,2) | O | 상품 등급 원점수(0~100). AI Service가 생육 점수 평균과 환경 유지 점수를 합산해 계산 후 전달 |
+| product_grade | VARCHAR(10) | O | 상품 등급 (TOP/HIGH/MID/LOW). Cultivation Service가 `product_score`를 구간별로 매핑 |
 
-`UNIQUE(cultivation_id, flush_no)`로 같은 재배 안에서 순번이 중복되지 않도록 합니다.
+재배 하나당 수확은 한 건만 기록됩니다(`UNIQUE(cultivation_id)`). 병 재배를 전제로
+하나의 재배 단위(병)에서 자란 버섯은 한 번에 수확하며, 재배마다 여러 번 나눠
+수확하지 않습니다.
+
+`product_score`/`product_grade`는 수확 기록 시점에는 비어 있다가, `HarvestCompletedEvent`를
+구독한 AI Service가 생육 점수 평균(자체 DB의 `growth_record`)과 환경 유지 점수(Cultivation
+Service에 새로 조회)를 합산해 원점수를 계산해 돌려주면 그때 채워집니다. Cultivation
+Service는 전달받은 원점수를 아래 구간으로 매핑해 `product_grade`에 저장합니다.
+
+| product_score | product_grade |
+|----------------|----------------|
+| 95점 이상 | TOP (최상) |
+| 80점 이상 | HIGH (상) |
+| 60점 이상 | MID (중) |
+| 60점 미만 | LOW (하) |
+
+자세한 흐름은 [product-grade.md](../04_sequence/product-grade.md) 참고.
 
 ---
 
@@ -341,18 +358,22 @@ CREATE TABLE harvest (
 
     cultivation_id BIGINT NOT NULL,
 
-    flush_no SMALLINT NOT NULL,
-
     harvest_weight NUMERIC(6,1),
 
     memo TEXT,
 
     harvested_at TIMESTAMP NOT NULL,
 
+    product_score NUMERIC(5,2),
+
+    product_grade VARCHAR(10),
+
     CONSTRAINT fk_harvest_cultivation
         FOREIGN KEY (cultivation_id) REFERENCES cultivation(id) ON DELETE CASCADE,
 
-    CONSTRAINT uk_harvest_cultivation_flush UNIQUE (cultivation_id, flush_no)
+    CONSTRAINT uk_harvest_cultivation UNIQUE (cultivation_id),
+
+    CONSTRAINT chk_harvest_product_grade CHECK (product_grade IN ('TOP', 'HIGH', 'MID', 'LOW'))
 );
 ```
 
@@ -576,12 +597,8 @@ ON cultivation(user_id, created_at DESC);
 
 사용자별 재배 목록 조회에 사용합니다.
 
-```sql
-CREATE INDEX idx_harvest_cultivation
-ON harvest(cultivation_id, flush_no);
-```
-
-재배별 수확 이력 조회에 사용합니다.
+재배당 수확이 한 건뿐이라 `harvest.cultivation_id`의 `UNIQUE` 제약이 만드는 인덱스로
+조회가 충분해, 별도 인덱스는 두지 않습니다.
 
 ```sql
 CREATE INDEX idx_photo_cultivation
@@ -683,7 +700,10 @@ Cultivation Service는 병합 이전 Sensor Service와 데이터베이스를 공
   안이 되면서 불필요해졌습니다). Rule Engine Service를 위한 이벤트 발행 자체는
   계속됩니다.
 - 수확이 기록되면 `HarvestCompletedEvent`가 발행되어, AI Service가 이를 구독해
-  "인사이트" 사례를 즉시 적재합니다.
+  "인사이트" 사례를 즉시 적재하고, 상품 등급 원점수(`product_score`)를 계산해
+  Cultivation Service에 돌려줍니다. `product_grade`는 그 원점수를 받은 Cultivation
+  Service가 매깁니다. 이 콜백 호출이 실패하면 `product_score`/`product_grade`는
+  NULL로 남으며, 재시도 정책은 추후 정합니다.
 - 사진 저장소(`storage_type`)를 MinIO에서 로컬로(또는 그 반대로) 전환해도 기존 행을
   다시 쓸 필요가 없습니다.
 - `sensor`/`environment_setting`은 병합 이전 소프트 참조였던 `cultivation_id`가 실제

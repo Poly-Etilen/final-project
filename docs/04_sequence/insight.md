@@ -91,7 +91,7 @@ Client (날짜별 상세, 추가 LLM 호출 없음)
 
 ## 1. HarvestCompletedEvent 구독
 
-Cultivation Service가 수확(flush)을 기록할 때마다 `HarvestCompletedEvent`를
+Cultivation Service가 수확을 기록할 때(재배당 한 번) `HarvestCompletedEvent`를
 발행하며, AI Service는 이 이벤트를 구독해 인사이트 사례 적재를 트리거합니다. 별도의
 스케줄러나 임계치 없이, 이벤트를 받을 때마다 바로 처리합니다.
 
@@ -99,7 +99,6 @@ Cultivation Service가 수확(flush)을 기록할 때마다 `HarvestCompletedEve
 {
     "harvestId": 41,
     "cultivationId": 12,
-    "flushNo": 1,
     "harvestWeight": 3200
 }
 ```
@@ -139,18 +138,17 @@ LIMIT 1;
 
 ## 4. insight 테이블 저장
 
-조합한 데이터를 AI DB의 `insight` 테이블에 저장합니다. 각 행은 재배가 아닌 개별
-수확(harvest, flush) 단위이며, 같은 재배의 서로 다른 flush는 각각 독립된 행으로
-저장됩니다.
+조합한 데이터를 AI DB의 `insight` 테이블에 저장합니다. 재배당 수확이 한 번뿐이라
+`insight` 행도 재배 하나당 최대 한 행입니다.
 
 ```sql
 INSERT INTO insight
-    (harvest_id, cultivation_id, flush_no, mushroom_type,
+    (harvest_id, cultivation_id, mushroom_type,
      avg_temperature, avg_humidity, avg_co2, avg_light,
      growth_score, harvest_weight, summary)
 VALUES
-    (41, 12, 1, 'OYSTER', 21.8, 89.2, 780.5, 360.0, 88, 3200,
-     '느타리버섯, 평균 온도 21.8℃·습도 89% 환경에서 생육 점수 88점으로 3.2kg 수확 (1차 수확)');
+    (41, 12, 'OYSTER', 21.8, 89.2, 780.5, 360.0, 88, 3200,
+     '느타리버섯, 평균 온도 21.8℃·습도 89% 환경에서 생육 점수 88점으로 3.2kg 수확');
 ```
 
 `summary`(자연어 요약)는 이 단계에서 AI Service가 미리 만들어 함께 저장해 둡니다 —
@@ -261,7 +259,7 @@ ORDER BY feedback_date ASC;
     "days": [
         { "date": "2026-07-25", "avgTemperature": 21.5, "avgHumidity": 88.0, "avgCo2": 770, "avgLight": 355, "content": "환경이 안정적으로 유지되고 있습니다." },
         { "date": "2026-07-26", "avgTemperature": 22.0, "avgHumidity": 89.5, "avgCo2": 790, "avgLight": 360, "content": "..." },
-        { "date": "2026-08-10", "avgTemperature": 21.8, "avgHumidity": 89.2, "avgCo2": 780.5, "avgLight": 360.0, "content": "느타리버섯, 평균 온도 21.8℃·습도 89% 환경에서 생육 점수 88점으로 3.2kg 수확 (1차 수확)" }
+        { "date": "2026-08-10", "avgTemperature": 21.8, "avgHumidity": 89.2, "avgCo2": 780.5, "avgLight": 360.0, "content": "느타리버섯, 평균 온도 21.8℃·습도 89% 환경에서 생육 점수 88점으로 3.2kg 수확" }
     ]
 }
 ```

@@ -63,7 +63,6 @@ insight
 PK  id
     harvest_id        (UNIQUE)
     cultivation_id
-    flush_no
     mushroom_type
     avg_temperature
     avg_humidity
@@ -174,9 +173,8 @@ AI Service가 구독해, 그 수확 건 하나당 행 하나를 즉시 저장합
 | 컬럼명 | 타입 | NULL | 설명 |
 |---------|------|------|------|
 | id | BIGSERIAL | X | PK |
-| harvest_id | BIGINT | X | 수확(flush) 참조 (Cultivation Service, 소프트 참조), UNIQUE |
+| harvest_id | BIGINT | X | 수확 참조 (Cultivation Service, 소프트 참조), UNIQUE |
 | cultivation_id | BIGINT | X | 재배 참조 (소프트 참조) |
-| flush_no | SMALLINT | X | 해당 재배의 몇 번째 수확인지 |
 | mushroom_type | VARCHAR(20) | X | 버섯 종류 (검색 필터용) |
 | avg_temperature | NUMERIC(5,2) | O | 기간 가중 평균 온도 |
 | avg_humidity | NUMERIC(5,2) | O | 기간 가중 평균 습도 |
@@ -188,10 +186,11 @@ AI Service가 구독해, 그 수확 건 하나당 행 하나를 즉시 저장합
 | created_at | DATETIME | X | 저장 시각 |
 
 `harvest_id`는 UNIQUE 제약을 둡니다 — 이벤트가 중복 전달되더라도 같은 수확 건이 두 번
-적재되지 않도록 막기 위함입니다. `cultivation_id`만으로는 harvest가 1:N이라 같은
-재배의 여러 flush 사례를 구분할 수 없어 `harvest_id`/`flush_no`를 함께 둡니다. 인사이트
-검색은 벡터 유사도가 아니라 `mushroom_type`(정확히 일치) + `avg_temperature`(오차
-범위) 필터로 수행하므로, 임베딩(Vector) 컬럼은 두지 않습니다.
+적재되지 않도록 막기 위함입니다. `harvest`가 `cultivation`과 1:1이라(재배당 한 건)
+`cultivation_id`도 사실상 함께 유일하지만, insight의 발생 단위 자체는 "수확 건"이라
+`harvest_id`를 기준 참조로 둡니다. 인사이트 검색은 벡터 유사도가 아니라
+`mushroom_type`(정확히 일치) + `avg_temperature`(오차 범위) 필터로 수행하므로, 임베딩
+(Vector) 컬럼은 두지 않습니다.
 
 ---
 
@@ -286,8 +285,6 @@ CREATE TABLE insight (
     harvest_id BIGINT NOT NULL,
 
     cultivation_id BIGINT NOT NULL,
-
-    flush_no SMALLINT NOT NULL,
 
     mushroom_type VARCHAR(20) NOT NULL,
 

@@ -5,15 +5,15 @@
 사용자가 재배 중 수확 결과를 기록하는 과정과, 재배를 종료하는 과정입니다. "수확 기록
 저장"과 "재배 종료"는 서로 다른 시점에 호출되는 별개의 API입니다.
 
-- **수확 기록 저장** — 재배가 `RUNNING`인 동안 사용자가 원할 때마다 여러 번 반복할 수
-  있습니다(같은 배지에서 1차/2차/3차로 여러 번 수확하는 "flush"를 표현). 재배 상태는
-  바뀌지 않습니다.
+- **수확 기록 저장** — 재배가 `RUNNING`인 동안 한 번만 기록할 수 있습니다. 병 재배를
+  전제로 재배(병) 하나에서 자란 버섯은 한 번에 수확하기 때문입니다. 기록 자체는 재배
+  상태를 바꾸지 않습니다.
 - **재배 종료** — 더 이상 수확 정보를 받지 않으며, 재배 상태를 `FINISHED`로 바꾸는
   별도의 단순한 동작입니다.
 
 ---
 
-# Sequence — ① 수확 기록 저장 (여러 번 가능)
+# Sequence — ① 수확 기록 저장 (재배당 한 번)
 
 ```text
 Client (사진 촬영, 선택)
@@ -38,7 +38,7 @@ Client (분석 결과 확인)
 ↓
 Cultivation Service
 ↓
-flush_no 자동 채번 + harvest 행 저장
+harvest 행 저장 (재배당 한 건, 이미 있으면 거부)
 ↓
 RabbitMQ (HarvestCompletedEvent)
 ↓
@@ -144,24 +144,23 @@ AI Service → Cultivation Service → Client
 ## 6. 수확 기록 요청
 
 ```http
-POST /api/v1/cultivations/{cultivationId}/harvests
+POST /api/v1/cultivations/{cultivationId}/harvest
 ```
 
 ```json
 {
     "harvestWeight": 1800,
-    "memo": "1차 수확, 상태 양호"
+    "memo": "상태 양호"
 }
 ```
-
-몇 번째 수확인지(`flushNo`)는 사용자가 입력하지 않습니다.
 
 ---
 
 ## 7. Harvest 저장
 
-Cultivation Service는 같은 `cultivation_id`의 기존 `harvest` 중 최댓값 + 1로 `flush_no`를
-채번하고, `harvest` 행을 새로 저장합니다. 재배 상태는 바뀌지 않습니다.
+Cultivation Service는 같은 `cultivation_id`에 이미 `harvest` 행이 있는지 확인합니다
+(`UNIQUE(cultivation_id)`). 없으면 새로 저장하고, 이미 있으면 거부합니다. 재배 상태는
+바뀌지 않습니다.
 
 ---
 
@@ -170,9 +169,10 @@ Cultivation Service는 같은 `cultivation_id`의 기존 `harvest` 중 최댓값
 ```json
 {
     "harvestId": 41,
-    "flushNo": 1,
     "harvestWeight": 1800,
-    "harvestedAt": "2026-08-20T09:00:00"
+    "harvestedAt": "2026-08-20T09:00:00",
+    "productScore": null,
+    "productGrade": null
 }
 ```
 
@@ -182,6 +182,11 @@ Cultivation Service는 같은 `cultivation_id`의 기존 `harvest` 중 최댓값
 
 Cultivation Service → RabbitMQ Publish → `HarvestCompletedEvent`
 
+Notification Service 외에 AI Service도 이 이벤트를 구독합니다 — 인사이트 사례 적재
+([insight.md](./insight.md))와 상품 등급 원점수 계산
+([product-grade.md](./product-grade.md))이 비동기로 트리거되며, 이 문서의 응답
+시점에는 아직 반영되지 않습니다.
+
 ---
 
 ## 10. Notification Service
@@ -190,7 +195,7 @@ RabbitMQ Subscribe → 등록된 채널로 알림 전송
 
 ```
 🍄 수확 기록 완료
-느타리 1호기 1차 수확이 기록되었습니다. 수확량: 1.8kg
+느타리 1호기 수확이 기록되었습니다. 수확량: 1.8kg
 ```
 
 ---
@@ -206,8 +211,8 @@ PATCH /api/v1/cultivations/{cultivationId}/finish
 ## 2. 재배 종료 처리
 
 Cultivation Service는 종료일을 저장하고 재배 상태를 `RUNNING → FINISHED`로 변경합니다.
-`harvest` 행은 새로 생성하지 않으며, 지금까지 기록된 모든 flush가 그대로 수확 이력으로
-남습니다.
+`harvest` 행은 새로 생성하지 않으며, 이미 기록된 수확(있다면)이 그대로 수확 이력으로
+남습니다. 수확 기록 없이 종료하는 것도 허용합니다.
 
 ## 3. 응답
 
@@ -227,7 +232,7 @@ Cultivation Service → RabbitMQ Publish → `CultivationFinishedEvent`
 
 ```
 🍄 재배 종료
-느타리 1호기 재배가 종료되었습니다. 총 수확 2회 (합계 3.2kg)
+느타리 1호기 재배가 종료되었습니다. 수확량: 1.8kg
 ```
 
 ---
@@ -280,7 +285,7 @@ Notification Service
 
 ```
 RUNNING
-↓ 수확 기록 저장 (여러 번 반복 가능, 상태 변화 없음)
+↓ 수확 기록 저장 (재배당 한 번, 상태 변화 없음)
 ↓ 재배 종료 요청
 FINISHED
 ```
@@ -303,7 +308,11 @@ FINISHED
 - AI 생육 분석은 선택 사항이며, 건너뛰고 바로 수확 기록을 남길 수도 있습니다.
 - `growthScore`/`myceliumGrowthRate`/`capSize`/`color`/`diseaseDetected`/`growthStage`는
   Vision 모델이 산출한 결과입니다.
-- `flush_no`는 사용자가 지정하지 않고 Cultivation Service가 자동 채번합니다.
-- 종료된 재배는 재배 이력(`GET /cultivations/history`)에서 합산값
-  (`harvestCount`/`totalHarvestWeight`)으로 조회되며, 개별 수확 내역은
-  `GET /cultivations/{cultivationId}/harvests`로 따로 조회합니다.
+- `harvest`는 `cultivation`당 최대 한 건입니다(`UNIQUE(cultivation_id)`). 이미 기록된
+  재배에 다시 요청하면 거부됩니다.
+- 종료된 재배는 재배 이력(`GET /cultivations/history`)에서 `harvestWeight`로 함께
+  조회되며, 필요하면 `GET /cultivations/{cultivationId}/harvest`로 단건 조회할 수
+  있습니다.
+- `productScore`/`productGrade`는 이 응답 시점에는 항상 NULL입니다. `HarvestCompletedEvent`를
+  구독한 AI Service가 비동기로 계산해 돌려준 뒤에야 채워집니다. 자세한 내용은
+  [product-grade.md](./product-grade.md) 참고.

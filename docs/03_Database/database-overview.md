@@ -39,7 +39,7 @@ Service 통합).
 ### Table
 
 - cultivation (UNIQUE(user_id, name), status CREATED/RUNNING/FINISHED, mushroom_type은 같은 DB의 `mushroom_reference`를 실제 FK로 참조)
-- harvest (cultivation당 여러 건, UNIQUE(cultivation_id, flush_no))
+- harvest (cultivation당 한 건, UNIQUE(cultivation_id). product_score/product_grade는 AI Service가 계산해 전달, 등급 매핑은 Cultivation Service가 수행)
 - photo (object_key + storage_type으로 저장소 중립적 메타데이터 관리)
 - measurement_type (온도/습도/CO2/조도 4종 참조 테이블 — 여러 테이블이 공유하는 항목 도메인을 한 곳에서 정의)
 - sensor (PK는 대리키 id, device_eui UNIQUE, is_deleted 소프트 삭제, cultivation_id는 실제 FK)

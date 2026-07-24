@@ -3,9 +3,9 @@
 ## 역할
 
 Cultivation Service는 사용자의 버섯 재배 자체와 그 재배에 필요한 센서/환경 데이터를
-함께 관리하는 서비스입니다. 재배 생성/조회/종료, 재배당 여러 번 발생하는 수확(flush)
-기록, 생육 사진 업로드에 더해, 센서 장치 메타데이터, 사용자가 설정한 목표 환경(위험
-한계값), 공공데이터 기반 버섯 참조 데이터, 센서 측정값 저장/조회/통계까지 담당합니다
+함께 관리하는 서비스입니다. 재배 생성/조회/종료, 수확 기록(재배당 한 건), 생육 사진
+업로드에 더해, 센서 장치 메타데이터, 사용자가 설정한 목표 환경(위험 한계값), 공공데이터
+기반 버섯 참조 데이터, 센서 측정값 저장/조회/통계까지 담당합니다
 (구 Sensor Service 통합). 문의(Inquiry) 접수와 관리자 처리도 이 서비스가 담당합니다.
 
 측정값 자체는 Rule Engine Service가 MQTT로 수신·검증한 뒤 RabbitMQ로 전달하면
@@ -16,7 +16,7 @@ Cultivation Service가 구독해 Redis(실시간)/InfluxDB(이력)에 저장합�
 # 책임
 
 - 재배 생성/조회/이력 조회/종료
-- 수확(flush) 기록 저장 (재배당 여러 번 가능)
+- 수확 기록 저장 (재배당 한 건)
 - 생육 사진 업로드
 - 센서 장치 등록/조회/삭제
 - 목표 환경 범위 저장/조회/평균 계산
@@ -24,6 +24,7 @@ Cultivation Service가 구독해 Redis(실시간)/InfluxDB(이력)에 저장합�
 - 센서 측정값 저장(Redis/InfluxDB)·조회·통계 (일일 피드백용 일간 통계 포함)
 - 문의(Inquiry) 등록/조회, 관리자 답변·처리
 - 재배 소유권 확인 API 제공 (내부용, 다른 서비스가 호출)
+- 환경 준수율 집계 제공 + 상품 등급 원점수 수신·등급 매핑 (내부용, AI Service가 호출)
 
 ---
 
@@ -41,10 +42,11 @@ Cultivation Service와 Sensor Service가 별도 DB였기 때문에 OpenFeign 동
 
 ---
 
-## 수확(flush) 기록 저장
+## 수확 기록 저장
 
-재배가 `RUNNING`인 동안 수확이 있을 때마다 기록합니다. 여러 번 반복 호출할 수 있으며,
-재배 상태는 바뀌지 않습니다. 서버가 자동으로 순번(`flush_no`)을 채번합니다.
+재배가 `RUNNING`인 동안 수확을 기록합니다. 병 재배를 전제로 재배 하나(병 하나)당
+수확은 한 건만 기록하며(`UNIQUE(cultivation_id)`), 두 번째 기록 시도는 거부됩니다.
+기록 자체는 재배 상태를 바꾸지 않으며, 종료는 별도의 API로 처리합니다.
 
 ---
 
@@ -52,6 +54,27 @@ Cultivation Service와 Sensor Service가 별도 DB였기 때문에 OpenFeign 동
 
 재배 상태를 `FINISHED`로 바꿉니다. 수확 기록과는 별개의 API로, 더 이상 수확 정보를
 받지 않습니다.
+
+---
+
+## 상품 등급 매핑
+
+수확이 기록되면 `HarvestCompletedEvent`를 구독한 AI Service가 생육 점수 평균과 환경
+유지 점수를 합산한 원점수(`productScore`, 0~100)를 비동기로 계산해 돌려줍니다.
+Cultivation Service는 이 값을 받아 아래 구간으로 매핑해 `harvest.product_grade`에
+저장합니다.
+
+| product_score | product_grade |
+|----------------|----------------|
+| 95점 이상 | TOP (최상) |
+| 80점 이상 | HIGH (상) |
+| 60점 이상 | MID (중) |
+| 60점 미만 | LOW (하) |
+
+환경 유지 점수 계산에 필요한 원본 데이터(InfluxDB 측정값)는 Cultivation Service만
+접근할 수 있어, AI Service의 요청에 맞춰 재배 기간 동안 측정 항목별로
+`mushroom_reference_threshold` 추천 범위 안에 있었던 시간 비율을 집계해 제공합니다.
+자세한 흐름은 [product-grade.md](../04_sequence/product-grade.md) 참고.
 
 ---
 
@@ -144,9 +167,17 @@ PATCH /cultivations/{id}/finish
 
 ## 수확 기록 저장/조회
 
-POST /cultivations/{id}/harvests
+POST /cultivations/{id}/harvest
 
-GET /cultivations/{id}/harvests
+GET /cultivations/{id}/harvest
+
+---
+
+## 상품 등급 (내부용, AI Service가 호출)
+
+GET /cultivations/{id}/environment-compliance (측정 항목별 추천 범위 내 비율 집계)
+
+PATCH /cultivations/{id}/harvest/product-score (AI Service가 계산한 원점수 전달 → 등급 매핑 후 저장)
 
 ---
 
@@ -222,7 +253,7 @@ Cultivation Service는 하나의 PostgreSQL Database와 Redis/InfluxDB를 사용
 ## Table
 
 - cultivation (UNIQUE(user_id, name), status CREATED/RUNNING/FINISHED)
-- harvest (재배당 여러 건, UNIQUE(cultivation_id, flush_no))
+- harvest (재배당 한 건, UNIQUE(cultivation_id))
 - photo (object_key + storage_type)
 - measurement_type (온도/습도/CO2/조도 4종 참조 테이블)
 - sensor / sensor_type
@@ -247,7 +278,8 @@ Cultivation Service는 하나의 PostgreSQL Database와 Redis/InfluxDB를 사용
 ### AI Service
 
 - 생육 사진 조회(Vision 분석용, MinIO/로컬 경유), 환경 변경 이력/평균/일간 통계 조회,
-  버섯 참조 데이터(RAG 컨텍스트) 조회, 재배 정보 조회
+  버섯 참조 데이터(RAG 컨텍스트) 조회, 재배 정보 조회, 환경 준수율 집계 조회(상품
+  등급용), 상품 등급 원점수 전달
 
 ### Rule Engine Service
 
@@ -275,7 +307,8 @@ Cultivation Service는 하나의 PostgreSQL Database와 Redis/InfluxDB를 사용
 ### HarvestCompletedEvent
 
 수확 기록 저장 시 발행. Notification Service가 구독해 알림을 보내고, AI Service가
-구독해 "인사이트" 사례를 적재합니다.
+구독해 "인사이트" 사례를 적재하고 상품 등급 원점수를 계산합니다(계산 결과는 이벤트가
+아니라 별도의 OpenFeign 콜백으로 전달됩니다).
 
 ### CultivationFinishedEvent
 
@@ -326,6 +359,7 @@ Auth Service가 회원 탈퇴 시 발행. 해당 사용자의 재배 데이터�
 [sensor-error.md](../04_sequence/sensor-error.md),
 [daily-feedback.md](../04_sequence/daily-feedback.md),
 [insight.md](../04_sequence/insight.md),
+[product-grade.md](../04_sequence/product-grade.md),
 [inquiry.md](../04_sequence/inquiry.md) 참고.
 
 ---
@@ -336,6 +370,9 @@ Auth Service가 회원 탈퇴 시 발행. 해당 사용자의 재배 데이터�
 - 존재하지 않는 재배
 - 다른 사용자의 재배에 대한 접근 시도
 - `FINISHED` 상태 재배에 대한 수확 기록/사진 업로드 시도
+- 이미 수확 기록이 있는 재배에 대한 중복 수확 기록 시도
+- 존재하지 않는 재배/수확에 대한 상품 등급 원점수 전달 시도, 0~100 범위를 벗어난
+  원점수 전달 시도
 - 사진 저장소 업로드 실패
 - 중복된 device_eui 등록 시도
 - 존재하지 않는 센서
