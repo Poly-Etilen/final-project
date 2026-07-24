@@ -199,32 +199,34 @@ TTL
 
 ---
 
-## 인사이트 Cache
+## 인사이트 후보 Cache
 
-같은 버섯 종류 + 유사한 온도로 재배했던 타인의 사례를 바탕으로 한 피드백입니다. AI 리포트/
-버섯 가이드와 달리 스케줄러가 미리 채워두지 않고, 사용자가 요청한 시점(Cache Miss)에
-AI DB `insight` 테이블 검색(SQL 필터) + LLM 요약을 거쳐 채워지는 유일한 AI 캐시입니다.
-(자세한 내용은 [insight.md](../04_sequence/insight.md) 참고)
+같은 버섯 종류 + 유사한 환경으로 재배했던 타인의 사례 후보 리스트입니다. 웹 챗봇의
+`/인사이트` 명령어로 요청 시(Cache Miss)에만 AI DB `insight` 테이블 검색(SQL 필터)을
+거쳐 채워집니다. LLM은 호출하지 않습니다 — 요약은 적재 시점에 이미 만들어 둔
+`insight.summary`를 후보 상세 조회 때 재사용합니다. (자세한 내용은
+[insight.md](../04_sequence/insight.md) 참고)
 
 Key
 
 ```
-ai:{cultivationId}:insight
+ai:{cultivationId}:insight:candidates
 ```
 
 Example
 
 ```
-ai:27:insight
+ai:27:insight:candidates
 ```
 
 Value
 
 ```json
 {
-  "matchedCaseCount": 8,
-  "insight": "비슷한 온도로 재배한 다른 사례 8건과 비교했을 때, 현재 재배의 생육 점수는 평균보다 다소 높은 편입니다.",
-  "createdAt": "2026-08-16T10:00:00"
+  "candidates": [
+    { "insightId": 41, "growthScore": 88, "harvestWeight": 3200, "createdAt": "2026-08-10T09:00:00" },
+    { "insightId": 39, "growthScore": 82, "harvestWeight": 2900, "createdAt": "2026-08-05T09:00:00" }
+  ]
 }
 ```
 
@@ -234,9 +236,11 @@ TTL
 24시간
 ```
 
-유사 사례가 하나도 매칭되지 않아 고정 안내 문구로 응답한 경우는 캐시에 저장하지 않습니다.
+유사 사례가 하나도 매칭되지 않아 빈 리스트로 응답한 경우는 캐시에 저장하지 않습니다.
 새로운 수확이 계속 기록되며 `insight` 테이블에 사례가 쌓이므로, 다음 요청 시점에는
-매칭될 수 있기 때문입니다.
+매칭될 수 있기 때문입니다. 후보를 선택한 뒤의 상세 조회(날짜별 환경/피드백)는 캐시하지
+않습니다 — `cultivation_id` + 날짜 범위의 가벼운 인덱스 조회라 캐싱 이득이 크지
+않습니다.
 
 ---
 
@@ -349,7 +353,7 @@ Redis는 항상 갱신하지만, InfluxDB는 재배별 10초 간격으로 스로
 - AI 챗봇 응답 (ai:{hash}, TTL 24시간)
 - AI 생육 분석 결과 (ai:{cultivationId}:analysis, TTL 6시간)
 - 버섯 가이드 (ai:mushroom:{mushroomType}:guide, TTL 7일)
-- 인사이트 (ai:{cultivationId}:insight, TTL 24시간, 사용자 요청 시점에 채워짐)
+- 인사이트 후보 (ai:{cultivationId}:insight:candidates, TTL 24시간, 요청 시점에 채워짐)
 
 일일 피드백(환경 통계 포함)은 Redis에 캐시하지 않습니다. 하루에 한 번만 생성되고
 `daily_feedback` 테이블(PostgreSQL)에 바로 영구 저장되므로 별도 캐시가 필요하지
@@ -470,10 +474,10 @@ Dashboard 조회
 
 ---
 
-## 인사이트 Cache
+## 인사이트 후보 Cache
 
 ```
-사용자 요청 (GET /ai/insight)
+사용자 요청 ('/인사이트' 명령어)
 
 ↓
 
@@ -493,16 +497,24 @@ Redis 조회
 
 ↓
 
-Cultivation Service OpenFeign 호출 (버섯 종류 + 환경 평균 조회)
+Cultivation Service OpenFeign 호출 (버섯 종류 + 환경 평균 + 내 cultivation_id 목록 조회)
 
 ↓
 
-AI DB insight 테이블 검색 (mushroom_type 정확히 일치 + avg_temperature 오차 범위 SQL 필터)
+AI DB insight 테이블 검색 (mushroom_type 정확히 일치 + 온습도/CO2/조도 오차 범위 + 내 cultivation 제외, 최신순 SQL 필터)
 
 ↓
 
-매칭 사례 있음 → LLM 호출 → Redis 저장
+매칭 사례 있음 → Redis 저장 (LLM 미호출)
 매칭 사례 없음 → 고정 문구 반환 (Redis 저장 안 함)
+
+----------------
+
+후보 선택 시 (캐시하지 않음)
+
+↓
+
+AI DB daily_feedback 테이블 조회 (선택한 cultivation_id, 날짜순, 수확일은 insight.summary로 대체)
 ```
 
 ---
@@ -556,7 +568,7 @@ TTL을 사용하는 데이터
 - AI 챗봇 응답 캐시 (24시간)
 - AI 생육 분석 결과 캐시 (6시간)
 - 버섯 가이드 캐시 (7일)
-- 인사이트 캐시 (24시간, 사용자 요청 시점에 채워짐)
+- 인사이트 후보 캐시 (24시간, 요청 시점에 채워짐)
 - 목표 환경 범위 캐시 (Rule Engine Service, 24시간)
 
 TTL을 사용하지 않는 데이터
@@ -580,7 +592,7 @@ Redis 장애 발생 시
 
 - Cache Miss 처리
 - LLM 직접 호출
-- 인사이트는 원래도 사용자 요청마다 캐시 미스 시 재계산되는 흐름이라, Redis 장애 시에도 매번 insight 테이블 검색 + LLM 요약을 거쳐 응답은 가능합니다(속도만 저하)
+- 인사이트 후보는 원래도 요청마다 캐시 미스 시 재검색되는 흐름이라, Redis 장애 시에도 매번 insight 테이블 검색을 거쳐 응답은 가능합니다(속도만 저하). 후보 상세 조회는 원래 캐시하지 않으므로 영향이 없습니다.
 
 ---
 

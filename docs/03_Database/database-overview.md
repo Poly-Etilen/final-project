@@ -76,7 +76,7 @@ AI 챗봇 대화 이력, 생육 분석 이력, 일일 피드백 이력, 인사�
 - chat_log (발화 하나당 한 행. APP은 user_id 필수/cultivation_id 선택, TELEGRAM/DISCORD는 반대)
 - growth_record (Vision 분석 결과 이력, object_key/storage_type으로 사진 스냅샷 보관)
 - daily_feedback (UNIQUE(cultivation_id, feedback_date))
-- insight ("인사이트" 사례, harvest_id UNIQUE — 수확 완료 시점에 즉시 적재, mushroom_type/avg_temperature 인덱스로 SQL 검색)
+- insight ("인사이트" 사례, harvest_id UNIQUE — 수확 완료 시점에 즉시 적재, mushroom_type/avg_temperature 인덱스로 1차 필터 + 나머지 환경값 조건으로 SQL 검색)
 
 자세한 내용은 [ai-db.md](./ai-db.md) 참고.
 
@@ -100,7 +100,7 @@ Cultivation Service가 발행하는 이벤트(평상시) + 서비스 시작 시 
 | AI: 챗봇 응답 캐시 | `ai:{hash}` | 24시간 |
 | AI: 생육 분석 결과 캐시 | `ai:{cultivationId}:analysis` | 6시간 |
 | AI: 버섯 가이드 캐시 | `ai:mushroom:{mushroomType}:guide` | 7일 |
-| AI: 인사이트 캐시 | `ai:{cultivationId}:insight` | 24시간 (사용자 요청 시 채워짐) |
+| AI: 인사이트 후보 캐시 | `ai:{cultivationId}:insight:candidates` | 24시간 (요청 시 채워짐) |
 | Rule Engine: 목표 환경 범위 캐시 | `cultivation:{cultivationId}:range` | 24시간 (write-through) |
 | Cultivation: 최신 센서 데이터 | `cultivation:{cultivationId}:current` | 없음 (매초 덮어씀) |
 

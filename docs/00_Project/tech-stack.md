@@ -86,6 +86,7 @@ Spring Cloud 2025.1.x (Oakwood) 릴리스 트레인 사용 — Spring Boot 4.0.x
 ## API
 
 - REST API
+- WebSocket (웹 챗봇 채팅방)
 - Swagger (OpenAPI 3)
 
 ---

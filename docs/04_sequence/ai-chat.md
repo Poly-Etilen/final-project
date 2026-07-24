@@ -6,9 +6,11 @@
 참고해 답변을 생성하는 과정입니다. 동일한 질문에 대한 반복 호출을 줄이기 위해 Redis에
 응답을 캐싱합니다.
 
-챗봇은 웹/앱(`APP`) 채널뿐 아니라 Telegram/Discord 봇으로도 사용할 수 있습니다. 아래
-"1~9"는 APP 채널 기준이며, Telegram/Discord 채널의 흐름은 맨 아래 "채널별 챗봇" 섹션을
-참고하세요. 매 발화(사용자 질문, 챗봇 응답)는 `chat_log` 테이블(AI DB)에 한 행씩 영구
+챗봇은 용도가 다른 두 채널로 나뉩니다. 웹(`APP`) 채널은 WebSocket으로 연결하는 채팅방이며
+`/`로 시작하는 명령어(조리법 등 공공데이터 조회, `/인사이트`)를 처리합니다. 아래 "1~9"는
+웹(`APP`) 채널 기준이며, Telegram/Discord 채널의 흐름은 맨 아래 "채널별 챗봇" 섹션을
+참고하세요 — 이 채널은 명령어나 멀티유저 채팅방 없이 알림 수신 + 자연어 질의응답만
+제공합니다. 매 발화(사용자 질문, 챗봇 응답)는 `chat_log` 테이블(AI DB)에 한 행씩 영구
 저장되며, `GET /ai/chat/history`로 이전 대화를 조회할 수 있습니다.
 
 ---
@@ -18,32 +20,32 @@
 ```text
 Client
 ↓
-API Gateway
+API Gateway (WebSocket Upgrade)
 ↓
-AI Service
+AI Service — WebSocket 연결 수립 (JWT 인증)
 ↓
-Redis 조회
+메시지 수신 → '/' 명령어 여부 판별
+├── 명령어 아님 → 일반 질문 처리 (Redis 조회 → Cache Miss 시 Cultivation Service 조회 → LLM)
+├── '/인사이트' → 인사이트 후보 조회(최대 5개) → 선택 시 후보 상세 조회 (insight.md 참고)
+└── 그 외 '/' 명령어 → 공공데이터 API 조회
 ↓
-Cache Miss
+Redis 저장(일반 질문만) + chat_log 저장
 ↓
-Cultivation Service — 현재 환경 / 통계 / mushroom_reference 조회 (RAG 컨텍스트)
-↓
-AI Service → LLM — 답변 생성
-↓
-Redis 저장 + chat_log 저장
-↓
-Client
+Client (WebSocket으로 응답 전송)
 ```
 
 ---
 
 # 상세 과정
 
-## 1. 챗봇 질문 요청
+## 1. 웹소켓 연결 및 챗봇 질문 전송
 
 ```http
-POST /api/v1/ai/chat
+WS /api/v1/ai/chat
 ```
+
+Client가 WebSocket 연결을 수립하면(JWT로 인증), 이후 연결이 유지되는 동안 채팅방처럼
+여러 메시지를 주고받습니다. 연결 시 `cultivationId`를 지정할 수 있습니다(선택).
 
 ```json
 {
@@ -51,6 +53,23 @@ POST /api/v1/ai/chat
     "message": "왜 성장이 느린가요?"
 }
 ```
+
+---
+
+## 1-1. '/' 명령어 판별
+
+메시지가 `/`로 시작하면 일반 질문 대신 명령어로 처리합니다.
+
+- `/인사이트` → 인사이트 후보 조회를 호출해 최대 5개 리스트를 보여주고, 사용자가 그중
+  하나를 선택하면 후보 상세(날짜별 환경/피드백)를 이어서 보여줍니다. 자세한 흐름은
+  [insight.md](./insight.md) 참고.
+- 그 외 명령어(예: `/조리법 표고버섯`) → 조리법 등 공공데이터 API를 조회해 결과를
+  정리해 응답합니다.
+
+명령어 처리 결과도 `chat_log`에는 저장되지만, Redis 응답 캐시(`ai:{hash}`) 대상은
+아닙니다(질문 다양성이 낮고 원본 데이터가 자주 바뀔 수 있어 매번 새로 조회합니다).
+
+명령어가 아니면 2번부터 이어지는 기존 일반 질문 흐름을 그대로 따릅니다.
 
 ---
 
@@ -112,14 +131,16 @@ TTL: 24시간
 ```
 
 Redis 캐시 저장과 별개로, `chat_log`에 사용자 질문(`senderRole=USER`)과 챗봇 응답
-(`senderRole=BOT`) 두 행이 `channelType=APP`으로 저장됩니다. Redis는 캐시 미스 시에만
-채워지지만, `chat_log`는 캐시 히트 여부와 무관하게 매 요청마다 저장됩니다.
+(`senderRole=BOT`) 두 행이 `channelType=APP`으로 저장됩니다. Redis는 일반 질문의 캐시
+미스 시에만 채워지지만, `chat_log`는 명령어 처리 결과를 포함해 캐시 히트 여부와 무관하게
+매 요청마다 저장됩니다.
 
 ---
 
 ## 9. 응답 반환
 
-Client에게 챗봇 답변을 반환합니다.
+WebSocket 연결을 통해 Client에게 챗봇 답변을 전송합니다. 연결은 유지되며, Client는 이어서
+다음 메시지를 계속 보낼 수 있습니다.
 
 ---
 
@@ -147,8 +168,12 @@ chat_log 저장 (senderRole=BOT, 같은 cultivationId)
 Telegram Bot API / Discord Webhook으로 응답 전송
 ```
 
+이 채널에는 웹 채널의 `/` 명령어나 채팅방(여러 사용자가 함께 보는 대화) 기능이 없습니다
+— Notification Service의 알림 수신과 자연어 질의응답만 제공하며, 관련 확장 여부는 아직
+논의 중입니다.
+
 `notification_endpoint`가 재배 단위로 등록되므로, Telegram/Discord 챗봇도 항상 특정
-`cultivationId` 맥락에서 답변합니다(Cultivation Service 조회 등 APP 채널과 동일한 흐름
+`cultivationId` 맥락에서 답변합니다(Cultivation Service 조회 등 웹 채널과 동일한 흐름
 수행). 다만 이 경로로는 개별 사용자를 특정할 수 없어 `chat_log.user_id`는 NULL로
 저장됩니다. Notification Service를 호출하는 이유는 이미 알림 채널 등록용으로 저장된
 `notification_endpoint`를 챗봇 발신자 식별에도 재사용하기 위해서이며, 별도의
@@ -183,6 +208,14 @@ AI Service → Notification Service (Telegram/Discord 웹훅 수신 시, 발신�
 
 ---
 
+# 외부 연동
+
+```
+AI Service → 공공데이터 API (웹 채널 '/' 명령어 처리 시, 예: 조리법 조회)
+```
+
+---
+
 # RabbitMQ
 
 사용하지 않습니다. 챗봇은 사용자 요청 기반의 동기 처리입니다.
@@ -196,6 +229,8 @@ AI Service → Notification Service (Telegram/Discord 웹훅 수신 시, 발신�
 - `chat_log` 저장 실패 (저장에 실패해도 챗봇 응답 자체는 반환)
 - Telegram/Discord 웹훅으로 메시지가 왔지만 등록된 `notification_endpoint`가 없는 경우
 - Notification Service 호출 실패 (발신자 → cultivationId 조회 실패)
+- 웹 채널 WebSocket 연결 끊김 / 재연결
+- '/' 명령어 처리 중 공공데이터 API 호출 실패
 
 ---
 
@@ -214,3 +249,7 @@ AI Service → Notification Service (Telegram/Discord 웹훅 수신 시, 발신�
 - `notification_endpoint`가 재배 단위이므로, 같은 재배에 접근하는 여러 사용자가 같은
   Telegram/Discord 채널을 공유해서 사용합니다 — "누가 보냈는지"는 구분하지 않는 것이
   의도된 설계입니다.
+- 웹 채널의 `/` 명령어는 일반 질문과 달리 Redis 응답 캐시를 사용하지 않습니다 — 명령어별
+  결과(공공데이터, 인사이트)가 자주 바뀔 수 있어 매번 새로 조회합니다.
+- Telegram/Discord 채널에 `/` 명령어나 멀티유저 채팅방을 확장할지는 아직 결정되지
+  않았습니다. 이 문서는 현재 결정된 범위(알림 수신 + 자연어 질의응답)만 다룹니다.

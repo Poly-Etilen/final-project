@@ -160,10 +160,16 @@ InfluxDB 집계 조회 결과로 매일 채워지며, 그날 측정값이 전혀
 
 ## insight
 
-"인사이트" 기능(같은 버섯 종류 + 유사한 온도로 재배했던 타인의 사례 기반 피드백)의 사례
-데이터입니다. Cultivation Service가 수확을 기록하면 발행하는 `HarvestCompletedEvent`를
+"인사이트" 기능(같은 버섯 종류 + 유사한 환경으로 재배했던 타인의 사례를 보여주는 기능)의
+사례 데이터입니다. Cultivation Service가 수확을 기록하면 발행하는 `HarvestCompletedEvent`를
 AI Service가 구독해, 그 수확 건 하나당 행 하나를 즉시 저장합니다. 별도의 배치나 임계치
 없이 수확 시점마다 반영됩니다.
+
+조회 시에는 `mushroom_type`(정확히 일치) + `avg_temperature`/`avg_humidity`/`avg_co2`/
+`avg_light`(4개 항목 모두 오차 범위) 조건으로 후보를 찾아 최신순 최대 5개를 반환하고,
+사용자가 그중 하나를 선택하면 같은 `cultivation_id`의 `daily_feedback`을 날짜순으로 함께
+조회해 보여줍니다(수확일에는 `summary`로 대체). 자세한 흐름은
+[insight.md](../04_sequence/insight.md) 참고.
 
 | 컬럼명 | 타입 | NULL | 설명 |
 |---------|------|------|------|
@@ -339,8 +345,10 @@ CREATE INDEX idx_insight_mushroom_temp
 ON insight(mushroom_type, avg_temperature);
 ```
 
-"인사이트" 검색이 버섯 종류(정확히 일치) + 온도(범위)로 필터링하는 패턴이라 이 복합
-인덱스가 필요합니다.
+"인사이트" 검색이 버섯 종류(정확히 일치) + 온도(범위)로 1차 필터링하는 패턴이라 이
+복합 인덱스가 필요합니다. `avg_humidity`/`avg_co2`/`avg_light`도 함께 오차 범위로
+필터링하지만, 온도 필터로 이미 후보군이 충분히 좁혀질 것으로 예상되어 전용 인덱스는
+따로 두지 않았습니다. 정렬은 `created_at` 최신순입니다.
 
 ---
 
@@ -376,5 +384,8 @@ AI Service는 다른 서비스와 데이터베이스를 공유하지 않습니�
 - `daily_feedback`의 환경 통계 컬럼(`avg_temperature`~`min_temperature`)은 별도의
   주간/월간 리포트 테이블을 두지 않고 이 테이블에 통합한 결과입니다.
 - `insight.harvest_id`는 UNIQUE 제약으로 같은 수확 건의 중복 적재를 막습니다.
+- `insight`와 `daily_feedback`은 같은 DB에 있어, 인사이트 후보 상세 조회 시 선택한
+  `insight.cultivation_id`로 `daily_feedback`을 바로 조회할 수 있습니다(Cultivation
+  Service 등 다른 서비스 호출 불필요).
 - 데이터가 무한히 쌓이는 이력성 테이블들이라, 운영 단계에서는 오래된 데이터에 대한 보관
   주기 정책이 필요할 수 있습니다(추후 개발 예정).
